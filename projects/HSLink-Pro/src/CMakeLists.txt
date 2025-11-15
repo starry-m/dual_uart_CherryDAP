@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.13)
 
 set(APP_NAME "HSLink-Pro")
 set(BOARD_SEARCH_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../common)
-
+#add_definitions(-DRAPIDJSON_HAS_STDSTRING=0 -DRAPIDJSON_NO_EXCEPTIONS=1 -DRAPIDJSON_NO_STDITERATOR=1)
 set(CONFIG_USB_DEVICE 1)
 set(CONFIG_DMA_MGR 1)
 set(CONFIG_HPM_SPI 1)
@@ -97,14 +97,16 @@ sdk_app_src(setting.cpp)
 sdk_app_src(led_extern.cpp)
 
 sdk_compile_definitions(-DPRODUCT_STRING="HSLink Pro")
-sdk_compile_definitions(-DCONFIG_CHERRYDAP_USE_CUSTOM_HID=1)
+sdk_compile_definitions(-DCONFIG_CHERRYDAP_USE_CUSTOM_HID=0)
+#sdk_compile_definitions(-DCONFIG_CHERRYDAP_DUAL_UART=1)
+
 sdk_app_src(HSLink_Pro_expansion.cpp)
 
 file(GLOB_RECURSE HID_COMM_SRC
         "HID_COMM/*.c"
         "HID_COMM/*.cpp"
 )
-sdk_app_src(${HID_COMM_SRC})
+#sdk_app_src(${HID_COMM_SRC})
 sdk_app_inc(HID_COMM)
 
 sdk_compile_options(-O2)

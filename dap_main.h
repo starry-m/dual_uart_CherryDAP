@@ -22,6 +22,14 @@
 #define HID_IN_EP  0x88
 #define HID_OUT_EP 0x09
 
+#ifndef CONFIG_CHERRYDAP_DUAL_UART
+#define CONFIG_CHERRYDAP_DUAL_UART 1
+#endif
+#if CONFIG_CHERRYDAP_DUAL_UART
+#define CDC2_IN_EP  0x86
+#define CDC2_OUT_EP 0x07
+#define CDC2_INT_EP 0x88
+#endif
 #define USBD_VID           0x0D28
 #define USBD_PID           0x0204
 #define USBD_MAX_POWER     500

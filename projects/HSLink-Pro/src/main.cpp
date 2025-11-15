@@ -68,7 +68,7 @@ int main() {
 
     SWDIO_DIR_Init();
 
-    Setting_Init();
+//    Setting_Init();
 
     multiTimerInstall(millis);  // warning: timer cb all called in isr, and timer gap should align to 5ms
     board_timer_create(5, []() {multiTimerYield();});

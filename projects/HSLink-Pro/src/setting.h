@@ -54,34 +54,34 @@ extern BL_Setting_t bl_setting;
 extern HSLink_Lazy_t HSLink_Global;
 
 #ifdef __cplusplus
-#include "rapidjson/document.h"
-
-template<typename T>
-auto get_json_value(const rapidjson::Value &val, const char *key, T value) -> T;
-
-template<>
-auto get_json_value<bool>(const rapidjson::Value &val, const char *key, bool value) -> bool;
-
-template<>
-auto get_json_value<int>(const rapidjson::Value &val, const char *key, int value) -> int;
-
-template<>
-auto get_json_value<unsigned int>(const rapidjson::Value &val, const char *key, unsigned int value) -> unsigned int;
-
-template<>
-auto get_json_value<double>(const rapidjson::Value &val, const char *key, double value) -> double;
-
-template<>
-auto get_json_value<const char*>(const rapidjson::Value &val, const char *key, const char* value) -> const char*;
+//#include "rapidjson/document.h"
+//
+//template<typename T>
+//auto get_json_value(const rapidjson::Value &val, const char *key, T value) -> T;
+//
+//template<>
+//auto get_json_value<bool>(const rapidjson::Value &val, const char *key, bool value) -> bool;
+//
+//template<>
+//auto get_json_value<int>(const rapidjson::Value &val, const char *key, int value) -> int;
+//
+//template<>
+//auto get_json_value<unsigned int>(const rapidjson::Value &val, const char *key, unsigned int value) -> unsigned int;
+//
+//template<>
+//auto get_json_value<double>(const rapidjson::Value &val, const char *key, double value) -> double;
+//
+//template<>
+//auto get_json_value<const char*>(const rapidjson::Value &val, const char *key, const char* value) -> const char*;
 extern "C"
 {
 #endif
 
-void Setting_Init(void);
-
-void Setting_Save(void);
-
-void Setting_SaveHardwareVersion(version_t hw_ver);
+//void Setting_Init(void);
+//
+//void Setting_Save(void);
+//
+//void Setting_SaveHardwareVersion(version_t hw_ver);
 
 #ifdef __cplusplus
 }

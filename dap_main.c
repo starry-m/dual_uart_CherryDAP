@@ -33,15 +33,15 @@
                                USBD_WEBUSB_DESC_LEN * USBD_WEBUSB_ENABLE + \
                                USBD_WINUSB_DESC_LEN * USBD_WINUSB_ENABLE)
 
-#define USB_CONFIG_SIZE (9 + CMSIS_DAP_INTERFACE_SIZE + CDC_ACM_DESCRIPTOR_LEN + \
+#define USB_CONFIG_SIZE (9 + CMSIS_DAP_INTERFACE_SIZE + CDC_ACM_DESCRIPTOR_LEN+CONFIG_CHERRYDAP_DUAL_UART*CDC_ACM_DESCRIPTOR_LEN + \
                          CONFIG_CHERRYDAP_USE_CUSTOM_HID * CUSTOM_HID_LEN +      \
                          CONFIG_CHERRYDAP_USE_MSC * MSC_DESCRIPTOR_LEN + USBD_WEBUSB_ENABLE * 9)
 
-#define INTF_NUM (1 + 2 + CONFIG_CHERRYDAP_USE_CUSTOM_HID + CONFIG_CHERRYDAP_USE_MSC + USBD_WEBUSB_ENABLE)
+#define INTF_NUM (1 + 2+2*CONFIG_CHERRYDAP_DUAL_UART + CONFIG_CHERRYDAP_USE_CUSTOM_HID + CONFIG_CHERRYDAP_USE_MSC + USBD_WEBUSB_ENABLE)
 
 #define MSC_INTF_NUM (3 + CONFIG_CHERRYDAP_USE_CUSTOM_HID)
 
-#define WEBUSB_INTF_NUM (3 + CONFIG_CHERRYDAP_USE_CUSTOM_HID + CONFIG_CHERRYDAP_USE_MSC)
+#define WEBUSB_INTF_NUM (3 + 2*CONFIG_CHERRYDAP_DUAL_UART+CONFIG_CHERRYDAP_USE_CUSTOM_HID + CONFIG_CHERRYDAP_USE_MSC)
 
 #define WEBUSB_URL_STRINGS                                 \
     'c', 'h', 'e', 'r', 'r', 'y', 'd', 'a', 'p', '.', 'c', 'h', 'e', 'r', 'r', 'y', '-', 'e', 'm', 'b', 'e', 'd', 'd', 'e', 'd', '.', 'o', 'r', 'g',
@@ -196,6 +196,9 @@ static const uint8_t config_descriptor[] = {
     /* Endpoint IN 1 */
     USB_ENDPOINT_DESCRIPTOR_INIT(DAP_IN_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
     CDC_ACM_DESCRIPTOR_INIT(0x01, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, DAP_PACKET_SIZE, 0x00),
+    #if CONFIG_CHERRYDAP_DUAL_UART
+    CDC_ACM_DESCRIPTOR_INIT(MSC_INTF_NUM, CDC2_INT_EP, CDC2_OUT_EP, CDC2_IN_EP, DAP_PACKET_SIZE, 0x00),
+    #endif
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
     HID_DESC(),
 #endif
@@ -216,6 +219,9 @@ static const uint8_t other_speed_config_descriptor[] = {
     /* Endpoint IN 1 */
     USB_ENDPOINT_DESCRIPTOR_INIT(DAP_IN_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
     CDC_ACM_DESCRIPTOR_INIT(0x01, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, DAP_PACKET_SIZE, 0x00),
+    #if CONFIG_CHERRYDAP_DUAL_UART
+        CDC_ACM_DESCRIPTOR_INIT(MSC_INTF_NUM, CDC2_INT_EP, CDC2_OUT_EP, CDC2_IN_EP, DAP_PACKET_SIZE, 0x00),
+    #endif
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
     HID_DESC(),
 #endif
@@ -335,6 +341,9 @@ volatile uint8_t config_uart_transfer = 0;
 USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t uartrx_ringbuffer[CONFIG_UARTRX_RINGBUF_SIZE];
 USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t usbrx_ringbuffer[CONFIG_USBRX_RINGBUF_SIZE];
 USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t usb_tmpbuffer[DAP_PACKET_SIZE];
+#if CONFIG_CHERRYDAP_DUAL_UART
+USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t usb_tmpbuffer2[DAP_PACKET_SIZE];
+#endif
 
 static volatile uint8_t usbrx_idle_flag = 0;
 static volatile uint8_t usbtx_idle_flag = 0;
@@ -367,7 +376,9 @@ void usbd_event_handler(uint8_t busid, uint8_t event)
 
             usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
             usbd_ep_start_read(0, CDC_OUT_EP, usb_tmpbuffer, DAP_PACKET_SIZE);
-
+            #if CONFIG_CHERRYDAP_DUAL_UART
+            usbd_ep_start_read(0, CDC2_OUT_EP, usb_tmpbuffer2, DAP_PACKET_SIZE);
+            #endif
             break;
         case USBD_EVENT_SET_REMOTE_WAKEUP:
             break;
@@ -466,7 +477,31 @@ struct usbd_endpoint cdc_in_ep = {
     .ep_addr = CDC_IN_EP,
     .ep_cb = usbd_cdc_acm_bulk_in
 };
+#if CONFIG_CHERRYDAP_DUAL_UART
+void usbd_cdc2_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    USB_LOG_RAW("CDC2 out len:%d\r\n", nbytes);
+    usbd_ep_start_write(0, CDC2_IN_EP, usb_tmpbuffer2, nbytes);
+    usbd_ep_start_read(0, CDC2_OUT_EP, usb_tmpbuffer2, DAP_PACKET_SIZE);
 
+}
+
+void usbd_cdc2_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    USB_LOG_RAW("CDC2 IN len:%d\r\n", nbytes);
+}
+struct usbd_endpoint cdc2_out_ep = {
+    .ep_addr = CDC2_OUT_EP,
+    .ep_cb = usbd_cdc2_acm_bulk_out
+};
+
+struct usbd_endpoint cdc2_in_ep = {
+    .ep_addr = CDC2_IN_EP,
+    .ep_cb = usbd_cdc2_acm_bulk_in
+};
+#endif
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
 struct usbd_endpoint hid_custom_in_ep = {
         .ep_addr = HID_IN_EP,
@@ -482,6 +517,10 @@ struct usbd_endpoint hid_custom_out_ep = {
 struct usbd_interface dap_intf;
 struct usbd_interface intf1;
 struct usbd_interface intf2;
+#if CONFIG_CHERRYDAP_DUAL_UART
+struct usbd_interface intf3;
+struct usbd_interface intf4;
+#endif
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
 struct usbd_interface hid_intf;
 #endif
@@ -537,6 +576,15 @@ void chry_dap_init(uint8_t busid, uint32_t reg_base)
     usbd_add_interface(0, usbd_cdc_acm_init_intf(0, &intf2));
     usbd_add_endpoint(0, &cdc_out_ep);
     usbd_add_endpoint(0, &cdc_in_ep);
+
+
+#if CONFIG_CHERRYDAP_DUAL_UART
+    /*!< cdc acm */
+    usbd_add_interface(0, usbd_cdc_acm_init_intf(0, &intf3));
+    usbd_add_interface(0, usbd_cdc_acm_init_intf(0, &intf4));
+    usbd_add_endpoint(0, &cdc2_out_ep);
+    usbd_add_endpoint(0, &cdc2_in_ep);
+#endif
 
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
     /*!< hid */
