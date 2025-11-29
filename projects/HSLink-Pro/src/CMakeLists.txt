@@ -5,7 +5,6 @@ cmake_minimum_required(VERSION 3.13)
 
 set(APP_NAME "HSLink-Pro")
 set(BOARD_SEARCH_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../common)
-#add_definitions(-DRAPIDJSON_HAS_STDSTRING=0 -DRAPIDJSON_NO_EXCEPTIONS=1 -DRAPIDJSON_NO_STDITERATOR=1)
 set(CONFIG_USB_DEVICE 1)
 set(CONFIG_DMA_MGR 1)
 set(CONFIG_HPM_SPI 1)
@@ -98,8 +97,11 @@ sdk_app_src(led_extern.cpp)
 
 sdk_compile_definitions(-DPRODUCT_STRING="HSLink Pro")
 sdk_compile_definitions(-DCONFIG_CHERRYDAP_USE_CUSTOM_HID=0)
-#sdk_compile_definitions(-DCONFIG_CHERRYDAP_DUAL_UART=1)
-
+sdk_compile_definitions(-DCONFIG_CHERRYDAP_DUAL_UART=1)
+if (true)
+    message(STATUS "enabled dual UART")
+    sdk_app_src(USB2UART/usb2uart_2.c)
+endif ()
 sdk_app_src(HSLink_Pro_expansion.cpp)
 
 file(GLOB_RECURSE HID_COMM_SRC

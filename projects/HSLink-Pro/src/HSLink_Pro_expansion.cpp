@@ -441,18 +441,18 @@ static void Button_Init() {
 extern "C" void HSP_Init(void) {
     IONum_Init();
     // 初始化电源部分
-    Power_Enable_Init();
-    Port_Enable_Init();
-    Power_PWM_Init();
+//    Power_Enable_Init();
+//    Port_Enable_Init();
+//    Power_PWM_Init();
     // 初始化ADC部分
-    ADC_Init();
-    VREF_Init();
-    TVCC_Init();
-    WS2812_Init();
+//    ADC_Init();
+//    VREF_Init();
+//    TVCC_Init();
+//    WS2812_Init();
     Button_Init();
 
-    Power_Turn(HSLink_Setting.power.power_on);
-    Port_Turn(HSLink_Setting.power.port_on);
+//    Power_Turn(HSLink_Setting.power.power_on);
+//    Port_Turn(HSLink_Setting.power.port_on);
 
 #ifdef WS2812_TEST
     printf("blue\r\n");

@@ -23,7 +23,7 @@
 #define HID_OUT_EP 0x09
 
 #ifndef CONFIG_CHERRYDAP_DUAL_UART
-#define CONFIG_CHERRYDAP_DUAL_UART 1
+#define CONFIG_CHERRYDAP_DUAL_UART 0
 #endif
 #if CONFIG_CHERRYDAP_DUAL_UART
 #define CDC2_IN_EP  0x86
@@ -73,7 +73,10 @@ extern struct usbd_interface hid_intf;
 
 extern chry_ringbuffer_t g_uartrx;
 extern chry_ringbuffer_t g_usbrx;
-
+#if CONFIG_CHERRYDAP_DUAL_UART
+extern chry_ringbuffer_t g_uartrx_2nd;
+extern chry_ringbuffer_t g_usbrx_2nd;
+#endif
 void chry_dap_init(uint8_t busid, uint32_t reg_base);
 
 void chry_dap_handle(void);
@@ -87,7 +90,13 @@ extern void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_
 extern void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len);
 
 void chry_dap_usb2uart_uart_send_complete(uint32_t size);
+#if CONFIG_CHERRYDAP_DUAL_UART
+void chry_dap_usb2uart_2nd_uart_config_callback(struct cdc_line_coding *line_coding);
+void chry_dap_usb2uart_2nd_handle(void);
+void chry_dap_usb2uart_2nd_uart_send_complete(uint32_t size);
+extern void chry_dap_usb2uart_2nd_uart_send_bydma(uint8_t *data, uint16_t len);
 
+#endif
 /* implment by user */
 extern void hid_custom_notify_handler(uint8_t busid, uint8_t event, void *arg);
 
