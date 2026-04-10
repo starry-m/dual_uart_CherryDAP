@@ -20,7 +20,7 @@ ATTR_PLACE_AT(".bl_setting")
 static BL_Setting_t bl_setting;
 
 static const uint32_t CONFIG_P_EN = IOC_PAD_PA31;
-static const uint32_t CONFIG_Port_EN = IOC_PAD_PA04;
+static const uint32_t CONFIG_Port_EN = IOC_PAD_PA29;
 
 static void jump_app(void)
 {
@@ -33,11 +33,18 @@ static void jump_app(void)
 static void bootloader_button_init(void)
 {
     // BOOT1(PA03)
-    HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
+    // HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
 
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 3, gpiom_soc_gpio0);
-    gpio_set_pin_input(HPM_GPIO0, GPIO_OE_GPIOA, 3);
-    gpio_disable_pin_interrupt(HPM_GPIO0, GPIO_IE_GPIOA, 3);
+    // gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 3, gpiom_soc_gpio0);
+    // gpio_set_pin_input(HPM_GPIO0, GPIO_OE_GPIOA, 3);
+    // gpio_disable_pin_interrupt(HPM_GPIO0, GPIO_IE_GPIOA, 3);
+    
+    // BOOT0(PA02)
+    HPM_IOC->PAD[IOC_PAD_PA02].FUNC_CTL = IOC_PA02_FUNC_CTL_GPIO_A_02;
+
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 2, gpiom_soc_gpio0);
+    gpio_set_pin_input(HPM_GPIO0, GPIO_OE_GPIOA, 2);
+    gpio_disable_pin_interrupt(HPM_GPIO0, GPIO_IE_GPIOA, 2);
 }
 
 /**
@@ -116,13 +123,13 @@ int main(void)
 {
     board_init();
     EWDG_Init();
-    IOInit();
+    // IOInit();
     dma_mgr_init();
     board_init_usb(HPM_USB0);
     bootloader_button_init();
-    WS2812_Init();
-    WS2812_TurnOff();
-
+    // WS2812_Init();
+    // WS2812_TurnOff();
+    board_init_led_pins();
     if (bl_setting.magic != BL_SETTING_MAGIC)
     {
         memset(&bl_setting, 0x00, sizeof(bl_setting));
@@ -175,17 +182,20 @@ int main(void)
         {
             if (led_sta)
             {
-                WS2812_SetColor(0);
+                // WS2812_SetColor(0);
+                board_led_write(1, 0);
             }
             else
             {
-                WS2812_SetColor(0xFF / 8);
+                // WS2812_SetColor(0xFF / 8);
+                board_led_write(1, 1);
             }
             led_sta = !led_sta;
         }
         button_ticks();
         board_delay_ms(5);
     }
+    board_led_write(1, 0);
 
     // 检测2s内是否有按键按下
     if (button_is_pressed)
@@ -202,7 +212,7 @@ __entry_bl:
     printf("HSLink Pro UF2 Bootloader\n");
 
     msc_bootuf2_init(0, CONFIG_HPM_USBD_BASE);
-
+    uint8_t led_refresh_cnt = 0;
     while (1)
     {
         if (bootuf2_is_write_done())
@@ -212,8 +222,13 @@ __entry_bl:
             ppor_reset_mask_set_source_enable(HPM_PPOR, ppor_reset_software);
             ppor_sw_reset(HPM_PPOR, 1000);
         }
-        WS2812_ShowRainbow();
+        // WS2812_ShowRainbow();
 //        WS2812_ShowFadeOn();
+        led_refresh_cnt++;
+        if (led_refresh_cnt % 50 == 0) {
+            board_led_toggle(0);
+            led_refresh_cnt = 0;
+        }
         board_delay_ms(10);
         ewdg_refresh(HPM_EWDG0);
     }

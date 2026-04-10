@@ -4,6 +4,12 @@
  *
  */
 
+#ifdef __cplusplus
+#include <cstdint>
+#else
+#include <stdint.h>
+#endif
+
 #include <hpm_mchtmr_drv.h>
 #include <hpm_romapi.h>
 #include "board.h"
@@ -152,6 +158,10 @@ void board_print_clock_freq(void)
     printf("mchtmr0:\t\t %luHz\n", clock_get_frequency(clock_mchtmr0));
     printf("xpi0:\t\t %luHz\n", clock_get_frequency(clock_xpi0));
     printf("==============================\n");
+}
+uint8_t board_get_led_gpio_off_level(void)
+{
+    return BOARD_LED_OFF_LEVEL;
 }
 
 version_t HSLink_Hardware_Version;
@@ -367,6 +377,27 @@ void board_init_gpio_pins(void)
 {
     init_gpio_pins();
     gpio_set_pin_input(BOARD_BTN_GPIO_CTRL, BOARD_BTN_GPIO_INDEX, BOARD_BTN_GPIO_PIN);
+    gpio_set_pin_input(BOARD_BTN_SWITCH_GPIO_CTRL, BOARD_BTN_SWITCH_GPIO_INDEX, BOARD_BTN_SWITCH_GPIO_PIN);
+}
+void board_init_led_pins(void)
+{
+    init_led_pins_as_gpio();
+    gpio_set_pin_output_with_initial(BOARD_LED_G_GPIO_CTRL, BOARD_LED_G_GPIO_INDEX, BOARD_LED_G_GPIO_PIN, board_get_led_gpio_off_level());
+    gpio_set_pin_output_with_initial(BOARD_LED_B_GPIO_CTRL, BOARD_LED_B_GPIO_INDEX, BOARD_LED_B_GPIO_PIN, board_get_led_gpio_off_level());
+}
+
+void board_led_toggle(uint8_t mled)
+{
+    gpio_toggle_pin(mled==0 ? BOARD_LED_G_GPIO_CTRL : BOARD_LED_B_GPIO_CTRL,
+                    mled==0 ? BOARD_LED_G_GPIO_INDEX : BOARD_LED_B_GPIO_INDEX,
+                    mled==0 ? BOARD_LED_G_GPIO_PIN : BOARD_LED_B_GPIO_PIN);
+}
+
+void board_led_write(uint8_t mled, uint8_t state)
+{
+    gpio_write_pin(mled==0 ? BOARD_LED_G_GPIO_CTRL : BOARD_LED_B_GPIO_CTRL,
+                   mled==0 ? BOARD_LED_G_GPIO_INDEX : BOARD_LED_B_GPIO_INDEX,
+                   mled==0 ? BOARD_LED_G_GPIO_PIN : BOARD_LED_B_GPIO_PIN, state);
 }
 
 void board_init_usb(USB_Type *ptr)

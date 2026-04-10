@@ -311,7 +311,7 @@ __STATIC_INLINE uint8_t DAP_GetProductFirmwareVersionString(char *str)
 #define PIN_GPIOM         gpiom_core0_fast
 
 #define PIN_TCK           IOC_PAD_PB11
-#define PIN_TMS           IOC_PAD_PA29
+#define PIN_TMS           IOC_PAD_PB10
 #define PIN_TDI           IOC_PAD_PB13
 #define PIN_TDO           IOC_PAD_PB12
 

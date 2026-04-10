@@ -75,8 +75,20 @@ void init_gpio_pins(void)
 
     /* Button */
     uint32_t pad_ctl = IOC_PAD_PAD_CTL_PE_SET(1) | IOC_PAD_PAD_CTL_PS_SET(0) | IOC_PAD_PAD_CTL_HYS_SET(1);
-    HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
-    HPM_IOC->PAD[IOC_PAD_PA03].PAD_CTL = pad_ctl;
+    // HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
+    // HPM_IOC->PAD[IOC_PAD_PA03].PAD_CTL = pad_ctl;
+
+    HPM_IOC->PAD[IOC_PAD_PA02].FUNC_CTL = IOC_PA02_FUNC_CTL_GPIO_A_02;
+    HPM_IOC->PAD[IOC_PAD_PA02].PAD_CTL = pad_ctl;
+    // gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 2, gpiom_soc_gpio0);
+    // gpio_set_pin_input(HPM_GPIO0, GPIO_OE_GPIOA, 2);
+    // gpio_disable_pin_interrupt(HPM_GPIO0, GPIO_IE_GPIOA, 2);
+
+    HPM_IOC->PAD[IOC_PAD_PA31].FUNC_CTL = IOC_PA31_FUNC_CTL_GPIO_A_31;
+    HPM_IOC->PAD[IOC_PAD_PA31].PAD_CTL = pad_ctl;
+    // gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 31, gpiom_soc_gpio0);
+    // gpio_set_pin_input(HPM_GPIO0, GPIO_OE_GPIOA, 31);
+    // gpio_disable_pin_interrupt(HPM_GPIO0, GPIO_IE_GPIOA, 31);
 }
 
 void init_spi_pins(SPI_Type *ptr)
@@ -183,7 +195,20 @@ void init_usb_pins(USB_Type *ptr)
 
 void init_led_pins_as_gpio(void)
 {
-    HPM_IOC->PAD[IOC_PAD_PA10].FUNC_CTL = IOC_PA10_FUNC_CTL_GPIO_A_10;
+    // HPM_IOC->PAD[IOC_PAD_PA10].FUNC_CTL = IOC_PA10_FUNC_CTL_GPIO_A_10;
+    HPM_IOC->PAD[IOC_PAD_PB08].FUNC_CTL = IOC_PB08_FUNC_CTL_GPIO_B_08;
+
+    // gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOB, 8, gpiom_soc_gpio0);
+    // gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOB, 8);
+    // gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOB, 8, 1);
+
+    HPM_IOC->PAD[IOC_PAD_PB09].FUNC_CTL = IOC_PB09_FUNC_CTL_GPIO_B_09;
+
+    // gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOB, 9, gpiom_soc_gpio0);
+    // gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOB, 9);
+    // gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOB, 9, 1);
+
+
 }
 
 /* for uart_rx_line_status case, need to a gpio pin to sent break signal */

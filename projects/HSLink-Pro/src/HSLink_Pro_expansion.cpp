@@ -49,18 +49,18 @@ static uint32_t pwm_current_reload;
 
 static uint32_t GPIO_Power_EN = IOC_PAD_PA31;
 static uint32_t GPIO_Port_EN = IOC_PAD_PA04;
-static uint32_t GPIO_BTN = IOC_PAD_PA03;
+static uint32_t GPIO_BTN = IOC_PAD_PA02;
 
 static void IONum_Init() {
     if (CheckHardwareVersion(0, 0, 0) or
         CheckHardwareVersion(1, 2, 0xFF)) {
         GPIO_Power_EN = IOC_PAD_PA31;
         GPIO_Port_EN = IOC_PAD_PA04;
-        GPIO_BTN = IOC_PAD_PA03;
+        GPIO_BTN = IOC_PAD_PA02;
     } else if (CheckHardwareVersion(1, 3, 0xFF)) {
         GPIO_Power_EN = IOC_PAD_PY00;
         GPIO_Port_EN = IOC_PAD_PA31;
-        GPIO_BTN = IOC_PAD_PA03;
+        GPIO_BTN = IOC_PAD_PA02;
     }
 }
 
@@ -393,7 +393,7 @@ extern "C" void WS2812_ShowRainbow() {
 #endif
 
 static void Button_Init() {
-    // PA03
+    // PA02
     HPM_IOC->PAD[GPIO_BTN].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(0);
 
     const auto port_index = GPIO_GET_PORT_INDEX(GPIO_BTN);
@@ -439,20 +439,20 @@ static void Button_Init() {
 }
 
 extern "C" void HSP_Init(void) {
-    IONum_Init();
+    // IONum_Init();
     // 初始化电源部分
-    Power_Enable_Init();
-    Port_Enable_Init();
-    Power_PWM_Init();
+    // Power_Enable_Init();
+    // Port_Enable_Init();
+    // Power_PWM_Init();
     // 初始化ADC部分
-    ADC_Init();
-    VREF_Init();
-    TVCC_Init();
-    WS2812_Init();
+    // ADC_Init();
+    // VREF_Init();
+    // TVCC_Init();
+    // WS2812_Init();
     Button_Init();
 
-    Power_Turn(HSLink_Setting.power.power_on);
-    Port_Turn(HSLink_Setting.power.port_on);
+    // Power_Turn(HSLink_Setting.power.power_on);
+    // Port_Turn(HSLink_Setting.power.port_on);
 
 #ifdef WS2812_TEST
     printf("blue\r\n");

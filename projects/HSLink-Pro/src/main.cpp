@@ -66,7 +66,7 @@ int main() {
     board_init_usb(HPM_USB0);
     dma_mgr_init();
 
-    SWDIO_DIR_Init();
+    // SWDIO_DIR_Init();
 
     Setting_Init();
 
@@ -78,7 +78,7 @@ int main() {
     uartx_preinit();
     chry_dap_init(0, HPM_USB0_BASE);
 
-    led.SetNeoPixel(neopixel);
+    // led.SetNeoPixel(neopixel);
 
     bl_setting.app_version.major = CONFIG_BUILD_VERSION_MAJOR;
     bl_setting.app_version.minor = CONFIG_BUILD_VERSION_MINOR;
@@ -91,10 +91,10 @@ int main() {
         chry_dap_handle();
         chry_dap_usb2uart_handle();
         usb2uart_handler();
-        HSP_Loop();
+        // HSP_Loop();
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
         HID_Handle();
 #endif
-        led.Handle();
+        // led.Handle();
     }
 }

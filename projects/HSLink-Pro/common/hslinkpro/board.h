@@ -153,9 +153,21 @@ uint64_t millis();
 #define BOARD_GPTMR_PWM_SYNC_CLK_NAME clock_gptmr0
 
 /* User LED */
+#define BOARD_LED_G_GPIO_CTRL  HPM_GPIO0
+#define BOARD_LED_G_GPIO_INDEX GPIO_DI_GPIOB
+#define BOARD_LED_G_GPIO_PIN   8
+
 #define BOARD_LED_GPIO_CTRL  HPM_GPIO0
-#define BOARD_LED_GPIO_INDEX GPIO_DI_GPIOA
-#define BOARD_LED_GPIO_PIN   2
+#define BOARD_LED_GPIO_INDEX GPIO_DI_GPIOB
+#define BOARD_LED_GPIO_PIN   10
+
+#define BOARD_LED_B_GPIO_CTRL  HPM_GPIO0
+#define BOARD_LED_B_GPIO_INDEX GPIO_DI_GPIOB
+#define BOARD_LED_B_GPIO_PIN   9
+
+#define BOARD_LED_OFF_LEVEL    0
+#define BOARD_LED_ON_LEVEL     1
+
 
 /* 12V Power Enable*/
 #define BOARD_12V_EN_GPIO_CTRL  HPM_GPIO0
@@ -173,9 +185,16 @@ uint64_t millis();
 /* User button */
 #define BOARD_BTN_GPIO_CTRL  HPM_GPIO0
 #define BOARD_BTN_GPIO_INDEX GPIO_DI_GPIOA
-#define BOARD_BTN_GPIO_PIN   3
+#define BOARD_BTN_GPIO_PIN   2
 #define BOARD_BTN_GPIO_IRQ   IRQn_GPIO0_A
 #define BOARD_BTN_PRESSED_VALUE 1
+
+#define BOARD_BTN_SWITCH_GPIO_CTRL  HPM_GPIO0
+#define BOARD_BTN_SWITCH_GPIO_INDEX GPIO_DI_GPIOA
+#define BOARD_BTN_SWITCH_GPIO_PIN   31
+#define BOARD_BTN_SWITCH_GPIO_IRQ   IRQn_GPIO0_A
+#define BOARD_BTN_SWITCH_PRESSED_VALUE 1
+
 
 /* spi section */
 #define BOARD_APP_SPI_BASE              HPM_SPI1
@@ -309,6 +328,13 @@ extern "C" {
 typedef void (*board_timer_cb)(void);
 
 void board_init_gpio_pins(void);
+
+void board_init_led_pins(void);
+
+void board_led_toggle(uint8_t mled);
+
+void board_led_write(uint8_t mled, uint8_t state);
+
 
 void board_init_usb(USB_Type *ptr);
 

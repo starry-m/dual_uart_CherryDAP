@@ -220,9 +220,9 @@ static void store_settings()
 
 static void update_settings()
 {
-    LED_SetBrightness(HSLink_Setting.led_brightness);
-    LED_SetBoost(HSLink_Setting.boost);
-    LED_SetEnable(HSLink_Setting.led);
+    // LED_SetBrightness(HSLink_Setting.led_brightness);
+    // LED_SetBoost(HSLink_Setting.boost);
+    // LED_SetEnable(HSLink_Setting.led);
 
     uartx_io_init();
 }
