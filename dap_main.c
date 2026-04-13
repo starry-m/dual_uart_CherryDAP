@@ -35,7 +35,8 @@
 
 #define USB_CONFIG_SIZE (9 + CMSIS_DAP_INTERFACE_SIZE + CDC_ACM_DESCRIPTOR_LEN + \
                          CONFIG_CHERRYDAP_USE_CUSTOM_HID * CUSTOM_HID_LEN +      \
-                         CONFIG_CHERRYDAP_USE_MSC * MSC_DESCRIPTOR_LEN + USBD_WEBUSB_ENABLE * 9)
+                         CONFIG_CHERRYDAP_USE_MSC * MSC_DESCRIPTOR_LEN +          \
+                         USBD_WEBUSB_ENABLE * 9)
 
 #define INTF_NUM (1 + 2 + CONFIG_CHERRYDAP_USE_CUSTOM_HID + CONFIG_CHERRYDAP_USE_MSC + USBD_WEBUSB_ENABLE)
 
@@ -367,7 +368,6 @@ void usbd_event_handler(uint8_t busid, uint8_t event)
 
             usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
             usbd_ep_start_read(0, CDC_OUT_EP, usb_tmpbuffer, DAP_PACKET_SIZE);
-
             break;
         case USBD_EVENT_SET_REMOTE_WAKEUP:
             break;
@@ -549,7 +549,32 @@ void chry_dap_init(uint8_t busid, uint32_t reg_base)
 #if CONFIG_CHERRYDAP_USE_MSC
     usbd_add_interface(0, usbd_msc_init_intf(0, &intf3, MSC_OUT_EP, MSC_IN_EP));
 #endif
+
     usbd_initialize(busid, reg_base, usbd_event_handler);
+}
+
+void chry_dap_deinit(uint8_t busid)
+{
+    usbd_deinitialize(busid);
+    /* Reset DAP transfer state */
+    USB_RequestIndexI = 0;
+    USB_RequestIndexO = 0;
+    USB_RequestCountI = 0;
+    USB_RequestCountO = 0;
+    USB_RequestIdle = 1;
+    USB_ResponseIndexI = 0;
+    USB_ResponseIndexO = 0;
+    USB_ResponseCountI = 0;
+    USB_ResponseCountO = 0;
+    USB_ResponseIdle = 1;
+}
+
+void chry_dap_cdc_state_reset(void)
+{
+    usbrx_idle_flag = 0;
+    usbtx_idle_flag = 0;
+    uarttx_idle_flag = 0;
+    config_uart_transfer = 0;
 }
 
 void chry_dap_handle(void)

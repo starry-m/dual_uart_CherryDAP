@@ -60,8 +60,8 @@ sdk_src(../../../CherryUSB/class/hid/usbd_hid.c)
 
 sdk_compile_definitions(-DPIN_JTAG_TRST=IOC_PAD_PB14)
 sdk_compile_definitions(-DPIN_SRST=IOC_PAD_PB15)
-sdk_compile_definitions(-DSWDIO_DIR=IOC_PAD_PA30)
-
+sdk_compile_definitions(-DMODE_SWITCH_PIN=IOC_PAD_PA30)
+sdk_compile_definitions(-DSWDIO_DIR=IOC_PAD_PA31)
 sdk_app_inc(SW_DP)
 sdk_app_src(SW_DP/SW_DP.c)
 sdk_app_src(SW_DP/SW_DP_SPI.c)
@@ -98,6 +98,20 @@ sdk_app_src(led_extern.cpp)
 
 sdk_compile_definitions(-DPRODUCT_STRING="HSLink Pro")
 sdk_compile_definitions(-DCONFIG_CHERRYDAP_USE_CUSTOM_HID=1)
+sdk_compile_definitions(-DCONFIG_CHERRYDAP_USE_FPGA_JTAG=1)
+
+# FPGA JTAG pin definitions
+sdk_compile_definitions(-DFPGA_PIN_TMS=IOC_PAD_PA04)
+sdk_compile_definitions(-DFPGA_PIN_TCK=IOC_PAD_PA05)
+sdk_compile_definitions(-DFPGA_PIN_TDO=IOC_PAD_PA06)
+sdk_compile_definitions(-DFPGA_PIN_TDI=IOC_PAD_PA07)
+
+# FPGA JTAG sources
+sdk_app_inc(FPGA_JTAG)
+sdk_app_src(FPGA_JTAG/fpga_jtag_mpsse.c)
+sdk_app_src(FPGA_JTAG/fpga_jtag_main.c)
+sdk_app_src(FPGA_JTAG/usbd_ftdi.c)
+sdk_app_src(mode_switch.c)
 sdk_app_src(HSLink_Pro_expansion.cpp)
 
 file(GLOB_RECURSE HID_COMM_SRC

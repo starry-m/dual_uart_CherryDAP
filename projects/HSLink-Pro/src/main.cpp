@@ -13,6 +13,11 @@
 #include <hpm_romapi.h>
 #include "MultiTimer.h"
 
+#if CONFIG_CHERRYDAP_USE_FPGA_JTAG
+#include "FPGA_JTAG/usbd_ftdi.h"
+#include "mode_switch.h"
+#endif
+
 static void serial_number_init(void) {
 #define OTP_CHIP_UUID_IDX_START (88U)
 #define OTP_CHIP_UUID_IDX_END   (91U)
@@ -25,15 +30,6 @@ static void serial_number_init(void) {
 
     sprintf(serial_number_dynamic, "%08X%08X%08X%08X", uuid_words[0], uuid_words[1], uuid_words[2], uuid_words[3]);
     printf("Serial number: %s\n", serial_number_dynamic);
-}
-
-ATTR_ALWAYS_INLINE
-static inline void SWDIO_DIR_Init(void) {
-    HPM_IOC->PAD[SWDIO_DIR].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(0);
-
-    gpiom_set_pin_controller(HPM_GPIOM, GPIO_GET_PORT_INDEX(SWDIO_DIR), GPIO_GET_PIN_INDEX(SWDIO_DIR), PIN_GPIOM);
-    gpio_set_pin_output(PIN_GPIO, GPIO_GET_PORT_INDEX(SWDIO_DIR), GPIO_GET_PIN_INDEX(SWDIO_DIR));
-    gpio_write_pin(PIN_GPIO, GPIO_GET_PORT_INDEX(SWDIO_DIR), GPIO_GET_PIN_INDEX(SWDIO_DIR), 1);
 }
 
 static void EWDG_Init() {
@@ -66,8 +62,6 @@ int main() {
     board_init_usb(HPM_USB0);
     dma_mgr_init();
 
-    // SWDIO_DIR_Init();
-
     Setting_Init();
 
     multiTimerInstall(millis);  // warning: timer cb all called in isr, and timer gap should align to 5ms
@@ -76,6 +70,13 @@ int main() {
     HSP_Init();
     intc_set_irq_priority(CONFIG_HPM_USBD_IRQn, 5);
     uartx_preinit();
+
+#if CONFIG_CHERRYDAP_USE_FPGA_JTAG
+    fpga_jtag_init();
+    mode_switch_init();
+#endif
+
+    /* Default: start in DAP mode */
     chry_dap_init(0, HPM_USB0_BASE);
 
     // led.SetNeoPixel(neopixel);
@@ -88,7 +89,29 @@ int main() {
 
     while (true) {
         ewdg_refresh(HPM_EWDG0);
+
+#if CONFIG_CHERRYDAP_USE_FPGA_JTAG
+        mode_switch_poll();
+
+        if (mode_switch_changed()) {
+            if (mode_switch_get() == MODE_FPGA_JTAG) {
+                chry_dap_deinit(0);
+                fpga_usb_init(0, HPM_USB0_BASE);
+            } else {
+                fpga_usb_deinit(0);
+                chry_dap_init(0, HPM_USB0_BASE);
+            }
+        }
+
+        if (mode_switch_get() == MODE_DAP) {
+            chry_dap_handle();
+        } else {
+            fpga_jtag_process();
+        }
+#else
         chry_dap_handle();
+#endif
+
         chry_dap_usb2uart_handle();
         usb2uart_handler();
         // HSP_Loop();
