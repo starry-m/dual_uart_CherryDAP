@@ -46,11 +46,14 @@ static inline void fpga_jtag_gpio_init(void)
     HPM_IOC->PAD[FPGA_PIN_TDI].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(0);
     HPM_IOC->PAD[FPGA_PIN_TDO].FUNC_CTL = IOC_PAD_FUNC_CTL_ALT_SELECT_SET(0);
 
-    /* Set pad control: medium drive strength, pull-down */
+    /* Set pad control: medium drive strength */
     HPM_IOC->PAD[FPGA_PIN_TMS].PAD_CTL = IOC_PAD_PAD_CTL_PRS_SET(2);
     HPM_IOC->PAD[FPGA_PIN_TCK].PAD_CTL = IOC_PAD_PAD_CTL_PRS_SET(2);
     HPM_IOC->PAD[FPGA_PIN_TDI].PAD_CTL = IOC_PAD_PAD_CTL_PRS_SET(2);
-    HPM_IOC->PAD[FPGA_PIN_TDO].PAD_CTL = IOC_PAD_PAD_CTL_PRS_SET(2);
+    /* TDO: enable pull-up to avoid floating when FPGA tri-states */
+    HPM_IOC->PAD[FPGA_PIN_TDO].PAD_CTL = IOC_PAD_PAD_CTL_PRS_SET(2) |
+                                           IOC_PAD_PAD_CTL_PE_SET(1) |
+                                           IOC_PAD_PAD_CTL_PS_SET(1);
 
     /* Configure GPIOM for fast GPIO access */
     gpiom_set_pin_controller(HPM_GPIOM, GPIO_GET_PORT_INDEX(FPGA_PIN_TMS), GPIO_GET_PIN_INDEX(FPGA_PIN_TMS), FPGA_GPIOM);

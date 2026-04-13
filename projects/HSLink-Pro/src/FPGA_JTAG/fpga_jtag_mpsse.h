@@ -25,6 +25,10 @@ extern "C" {
 #define MPSSE_NO_OP_1           9
 #define MPSSE_NO_OP_2           10
 #define MPSSE_TRANSMIT_BYTE_MSB 11
+#define MPSSE_READ_BYTE_LSB     12
+#define MPSSE_READ_BYTE_MSB     13
+#define MPSSE_READ_BIT_LSB      14
+#define MPSSE_READ_BIT_MSB      15
 
 /* JTAG buffer sizes */
 #define FPGA_JTAG_TX_BUFFER_SIZE (2 * 1024)

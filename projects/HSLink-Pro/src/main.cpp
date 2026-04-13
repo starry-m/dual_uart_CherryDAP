@@ -105,19 +105,21 @@ int main() {
 
         if (mode_switch_get() == MODE_DAP) {
             chry_dap_handle();
+            chry_dap_usb2uart_handle();
+#if CONFIG_CHERRYDAP_USE_CUSTOM_HID
+            HID_Handle();
+#endif
         } else {
             fpga_jtag_process();
+            fpga_uart_handle();
         }
 #else
         chry_dap_handle();
+        chry_dap_usb2uart_handle();
 #endif
 
-        chry_dap_usb2uart_handle();
         usb2uart_handler();
         // HSP_Loop();
-#if CONFIG_CHERRYDAP_USE_CUSTOM_HID
-        HID_Handle();
-#endif
         // led.Handle();
     }
 }

@@ -34,9 +34,10 @@ void fpga_mpsse_init(void)
 {
     memset(jtag_tx_buffer, 0, sizeof(jtag_tx_buffer));
     chry_ringbuffer_init(&jtag_tx_rb, jtag_tx_buffer, FPGA_JTAG_TX_BUFFER_SIZE);
-    fpga_jtag_gpio_init();
     mpsse_status = MPSSE_IDLE;
     jtag_received_flag = false;
+    jtag_rx_pos = 0;
+    jtag_rx_len = 0;
 }
 
 void fpga_mpsse_feed(uint8_t *data, uint32_t len)
@@ -101,6 +102,16 @@ bool fpga_mpsse_process(void)
                     jtag_rx_pos++;
                     break;
 
+                /* FT2232H specific commands (single byte, no parameters) */
+                case 0x8A: /* Disable Clock Divide by 5 (60MHz) */
+                case 0x8B: /* Enable Clock Divide by 5 (12MHz) */
+                case 0x8C: /* Enable 3-phase data clocking */
+                case 0x8D: /* Disable 3-phase data clocking */
+                case 0x96: /* Disable adaptive clocking */
+                case 0x97: /* Enable adaptive clocking */
+                    jtag_rx_pos++;
+                    break;
+
                 /* Byte transfer commands (LSB first) */
                 case 0x19: /* Clock Data Bytes Out on -ve clock edge LSB first (no read) */
                 case 0x1d: /* Clock Data Bytes Out on -ve clock edge LSB first (no read) ??? */
@@ -111,6 +122,11 @@ bool fpga_mpsse_process(void)
                 case 0x15:
                 case 0x31: /* Clock Data Bytes In and Out MSB first */
                 case 0x35:
+                /* Read-only byte commands */
+                case 0x28: /* Clock Data Bytes In on +ve clock edge LSB first */
+                case 0x2c: /* Clock Data Bytes In on -ve clock edge LSB first */
+                case 0x20: /* Clock Data Bytes In on +ve clock edge MSB first */
+                case 0x24: /* Clock Data Bytes In on -ve clock edge MSB first */
                     mpsse_status = MPSSE_RCV_LENGTH_L;
                     jtag_rx_pos++;
                     break;
@@ -126,6 +142,11 @@ bool fpga_mpsse_process(void)
                 case 0x1f:
                 case 0x13: /* Clock Data Bits Out on +ve clock edge MSB first */
                 case 0x17:
+                /* Read-only bit commands */
+                case 0x2a: /* Clock Data Bits In on +ve clock edge LSB first */
+                case 0x2e: /* Clock Data Bits In on -ve clock edge LSB first */
+                case 0x22: /* Clock Data Bits In on +ve clock edge MSB first */
+                case 0x26: /* Clock Data Bits In on -ve clock edge MSB first */
                     mpsse_status = MPSSE_RCV_LENGTH;
                     jtag_rx_pos++;
                     break;
@@ -148,7 +169,11 @@ bool fpga_mpsse_process(void)
             mpsse_longlen |= (jtag_rx_buffer[jtag_rx_pos] << 8) & 0xff00;
             jtag_rx_pos++;
 
-            if (jtag_cmd == 0x11 || jtag_cmd == 0x31 || jtag_cmd == 0x15 || jtag_cmd == 0x35) {
+            if (jtag_cmd == 0x20 || jtag_cmd == 0x24) {
+                mpsse_status = MPSSE_READ_BYTE_MSB;
+            } else if (jtag_cmd == 0x28 || jtag_cmd == 0x2c) {
+                mpsse_status = MPSSE_READ_BYTE_LSB;
+            } else if (jtag_cmd == 0x11 || jtag_cmd == 0x31 || jtag_cmd == 0x15 || jtag_cmd == 0x35) {
                 mpsse_status = MPSSE_TRANSMIT_BYTE_MSB;
             } else {
                 mpsse_status = MPSSE_TRANSMIT_BYTE;
@@ -236,6 +261,10 @@ bool fpga_mpsse_process(void)
 
             if (jtag_cmd == 0x6b || jtag_cmd == 0x4b || jtag_cmd == 0x6f || jtag_cmd == 0x4f) {
                 mpsse_status = MPSSE_TMS_OUT;
+            } else if (jtag_cmd == 0x22 || jtag_cmd == 0x26) {
+                mpsse_status = MPSSE_READ_BIT_MSB;
+            } else if (jtag_cmd == 0x2a || jtag_cmd == 0x2e) {
+                mpsse_status = MPSSE_READ_BIT_LSB;
             } else if (jtag_cmd == 0x13 || jtag_cmd == 0x17) {
                 mpsse_status = MPSSE_TRANSMIT_BIT_MSB;
             } else {
@@ -359,6 +388,76 @@ bool fpga_mpsse_process(void)
         case MPSSE_NO_OP_2:
             mpsse_status = MPSSE_IDLE;
             jtag_rx_pos++;
+            break;
+
+        case MPSSE_READ_BYTE_LSB: /* Read-only byte, LSB first, no data consumed */
+            usb_tx_data = 0;
+            for (uint32_t i = 8; i; i--) {
+                FPGA_TCK_LOW();
+                usb_tx_data >>= 1;
+                FPGA_TCK_HIGH();
+                if (FPGA_TDO_READ()) {
+                    usb_tx_data |= 0x80;
+                }
+            }
+            FPGA_TCK_LOW();
+            jtag_write(usb_tx_data);
+
+            if (mpsse_longlen == 0) {
+                mpsse_status = MPSSE_IDLE;
+            }
+            mpsse_longlen--;
+            break;
+
+        case MPSSE_READ_BYTE_MSB: /* Read-only byte, MSB first */
+            usb_tx_data = 0;
+            for (uint32_t i = 8; i; i--) {
+                FPGA_TCK_LOW();
+                usb_tx_data <<= 1;
+                FPGA_TCK_HIGH();
+                if (FPGA_TDO_READ()) {
+                    usb_tx_data |= 0x01;
+                }
+            }
+            FPGA_TCK_LOW();
+            jtag_write(usb_tx_data);
+
+            if (mpsse_longlen == 0) {
+                mpsse_status = MPSSE_IDLE;
+            }
+            mpsse_longlen--;
+            break;
+
+        case MPSSE_READ_BIT_LSB: /* Read-only bits, LSB first */
+            usb_tx_data = 0;
+            do {
+                FPGA_TCK_LOW();
+                usb_tx_data >>= 1;
+                FPGA_TCK_HIGH();
+                if (FPGA_TDO_READ()) {
+                    usb_tx_data |= 0x80;
+                }
+            } while ((mpsse_shortlen--) > 0);
+            FPGA_TCK_LOW();
+            jtag_write(usb_tx_data);
+            mpsse_status = MPSSE_IDLE;
+            /* No jtag_rx_pos++ — read-only, no data byte to consume */
+            break;
+
+        case MPSSE_READ_BIT_MSB: /* Read-only bits, MSB first */
+            usb_tx_data = 0;
+            do {
+                FPGA_TCK_LOW();
+                usb_tx_data <<= 1;
+                FPGA_TCK_HIGH();
+                if (FPGA_TDO_READ()) {
+                    usb_tx_data |= 0x01;
+                }
+            } while ((mpsse_shortlen--) > 0);
+            FPGA_TCK_LOW();
+            jtag_write(usb_tx_data);
+            mpsse_status = MPSSE_IDLE;
+            /* No jtag_rx_pos++ — read-only, no data byte to consume */
             break;
 
         default:

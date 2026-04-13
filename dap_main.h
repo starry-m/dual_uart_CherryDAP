@@ -66,6 +66,8 @@ extern struct usbd_interface hid_intf;
 extern chry_ringbuffer_t g_uartrx;
 extern chry_ringbuffer_t g_usbrx;
 
+extern volatile uint8_t uarttx_idle_flag;
+
 void chry_dap_init(uint8_t busid, uint32_t reg_base);
 
 void chry_dap_deinit(uint8_t busid);

@@ -6,8 +6,10 @@
 
 #include "usbd_ftdi.h"
 #include "fpga_jtag_io.h"
+#include "fpga_jtag_mpsse.h"
 #include "chry_ringbuffer.h"
 #include "usbd_core.h"
+#include "usbd_cdc.h"
 #include <string.h>
 
 /* FTDI EEPROM emulation data - FT2232 compatible */
@@ -39,7 +41,15 @@ const uint16_t ftdi_eeprom_info[] = {
 #define SIO_WRITE_EEPROM_REQUEST      0x91
 #define SIO_ERASE_EEPROM_REQUEST      0x92
 
-static uint8_t latency_timer = 0x10;
+static uint8_t latency_timer_a = 0x10;
+static uint8_t latency_timer_b = 0x10;
+
+/* Channel B UART configuration state */
+static volatile bool ftdi_uart_cfg_pending = false;
+static uint32_t ftdi_uart_baudrate = 115200;
+static uint8_t ftdi_uart_databits = 8;
+static uint8_t ftdi_uart_parity = 0;
+static uint8_t ftdi_uart_stopbits = 0;
 
 static void ftdi_set_baudrate(uint32_t itdf_divisor, uint32_t *actual_baudrate)
 {
@@ -65,6 +75,8 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
                                 uint8_t **data, uint32_t *len)
 {
     static uint32_t actual_baudrate = 1200;
+    /* FTDI uses wIndex low byte for port: 1=Channel A, 2=Channel B */
+    uint8_t port = setup->wIndex & 0xFF;
 
     switch (setup->bRequest) {
         case SIO_READ_EEPROM_REQUEST:
@@ -75,7 +87,10 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_RESET_REQUEST:
-            latency_timer = 0x10;
+            latency_timer_a = 0x10;
+            latency_timer_b = 0x10;
+            /* Purge MPSSE TX/RX buffers on reset */
+            fpga_mpsse_init();
             break;
 
         case SIO_SET_MODEM_CTRL_REQUEST:
@@ -88,10 +103,22 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
         case SIO_SET_BAUDRATE_REQUEST: {
             uint8_t baudrate_high = (setup->wIndex >> 8);
             ftdi_set_baudrate(setup->wValue | (baudrate_high << 16), &actual_baudrate);
+            /* Channel B baudrate → configure UART */
+            if (port == 2 && actual_baudrate > 0) {
+                ftdi_uart_baudrate = actual_baudrate;
+                ftdi_uart_cfg_pending = true;
+            }
             break;
         }
 
         case SIO_SET_DATA_REQUEST:
+            /* Channel B data format → configure UART */
+            if (port == 2) {
+                ftdi_uart_databits = setup->wValue & 0xFF;
+                ftdi_uart_parity = (setup->wValue >> 8) & 0x07;
+                ftdi_uart_stopbits = (setup->wValue >> 11) & 0x03;
+                ftdi_uart_cfg_pending = true;
+            }
             break;
 
         case SIO_POLL_MODEM_STATUS_REQUEST:
@@ -106,11 +133,17 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_SET_LATENCY_TIMER_REQUEST:
-            latency_timer = setup->wValue & 0xFF;
+            if (port == 1)
+                latency_timer_a = setup->wValue & 0xFF;
+            else
+                latency_timer_b = setup->wValue & 0xFF;
             break;
 
         case SIO_GET_LATENCY_TIMER_REQUEST:
-            *data = &latency_timer;
+            if (port == 1)
+                *data = &latency_timer_a;
+            else
+                *data = &latency_timer_b;
             *len = 1;
             break;
 
@@ -126,4 +159,19 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
     }
 
     return 0;
+}
+
+bool ftdi_uart_config_poll(struct cdc_line_coding *lc)
+{
+    if (!ftdi_uart_cfg_pending) {
+        return false;
+    }
+    ftdi_uart_cfg_pending = false;
+    lc->dwDTERate = ftdi_uart_baudrate;
+    lc->bDataBits = ftdi_uart_databits;
+    /* FTDI parity: 0=N,1=O,2=E,3=M,4=S — same encoding as CDC */
+    lc->bParityType = ftdi_uart_parity;
+    /* FTDI stop: 0=1,1=1.5,2=2 — same encoding as CDC */
+    lc->bCharFormat = ftdi_uart_stopbits;
+    return true;
 }
