@@ -11,6 +11,7 @@
 #include "usbd_core.h"
 #include "usbd_cdc.h"
 #include <string.h>
+#include <stdio.h>
 
 /* FTDI EEPROM emulation data - FT2232 compatible */
 const uint16_t ftdi_eeprom_info[] = {
@@ -43,6 +44,15 @@ const uint16_t ftdi_eeprom_info[] = {
 
 static uint8_t latency_timer_a = 0x10;
 static uint8_t latency_timer_b = 0x10;
+
+/* Which port is in MPSSE mode: 0=none, 1=Channel A, 2=Channel B */
+static uint8_t mpsse_port = 0;
+
+/* Modem status response: consistent value for both control and bulk transfers */
+static uint8_t ftdi_modem_status[2] = { 0x01, 0x60 }; /* no signals, THRE+TEMT */
+
+/* SIO_READ_PINS response */
+static uint8_t ftdi_pin_state = 0x00;
 
 /* Channel B UART configuration state */
 static volatile bool ftdi_uart_cfg_pending = false;
@@ -87,10 +97,25 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_RESET_REQUEST:
-            latency_timer_a = 0x10;
-            latency_timer_b = 0x10;
-            /* Purge MPSSE TX/RX buffers on reset */
-            fpga_mpsse_init();
+            printf("[FTDI] SIO_RESET wValue=%d port=%d\r\n", setup->wValue, port);
+            switch (setup->wValue) {
+                case 0: /* SIO_RESET_SIO: full device reset */
+                    latency_timer_a = 0x10;
+                    latency_timer_b = 0x10;
+                    fpga_mpsse_init();
+                    fpga_reset_tx_state();
+                    fpga_discard_rx();
+                    break;
+                case 1: /* SIO_RESET_PURGE_RX: purge read buffer (device->host) */
+                    fpga_mpsse_purge_tx();
+                    fpga_reset_tx_state();
+                    break;
+                case 2: /* SIO_RESET_PURGE_TX: purge write buffer (host->device) */
+                    /* Discard pending RX data; MPSSE state preserved */
+                    break;
+                default:
+                    break;
+            }
             break;
 
         case SIO_SET_MODEM_CTRL_REQUEST:
@@ -122,7 +147,7 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_POLL_MODEM_STATUS_REQUEST:
-            *data = (uint8_t *)&ftdi_eeprom_info[2];
+            *data = ftdi_modem_status;
             *len = 2;
             break;
 
@@ -149,13 +174,23 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
 
         case SIO_SET_BITMODE_REQUEST:
             /* Bitbang/MPSSE mode setting - mode is determined by data */
+            printf("[FTDI] SET_BITMODE mask=0x%02X mode=0x%02X port=%d\r\n",
+                   setup->wValue & 0xFF, (setup->wValue >> 8) & 0xFF, port);
+            if (((setup->wValue >> 8) & 0xFF) == 0x02) {
+                mpsse_port = port;  /* This port is now in MPSSE mode */
+            } else if (port == mpsse_port) {
+                mpsse_port = 0;  /* This port left MPSSE mode */
+            }
             break;
 
         case SIO_READ_PINS_REQUEST:
+            *data = &ftdi_pin_state;
+            *len = 1;
             break;
 
         default:
-            return -1;
+            /* Accept all unknown vendor requests to avoid stalling EP0 */
+            break;
     }
 
     return 0;
@@ -174,4 +209,19 @@ bool ftdi_uart_config_poll(struct cdc_line_coding *lc)
     /* FTDI stop: 0=1,1=1.5,2=2 — same encoding as CDC */
     lc->bCharFormat = ftdi_uart_stopbits;
     return true;
+}
+
+uint8_t ftdi_get_latency_timer_a(void)
+{
+    return latency_timer_a;
+}
+
+uint8_t ftdi_get_latency_timer_b(void)
+{
+    return latency_timer_b;
+}
+
+uint8_t ftdi_get_mpsse_port(void)
+{
+    return mpsse_port;
 }

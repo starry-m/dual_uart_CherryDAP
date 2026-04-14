@@ -8,6 +8,7 @@
 #include "fpga_jtag_io.h"
 #include "chry_ringbuffer.h"
 #include <string.h>
+#include <stdio.h>
 
 /* TX ring buffer for JTAG response data */
 static uint8_t jtag_tx_buffer[FPGA_JTAG_TX_BUFFER_SIZE];
@@ -24,10 +25,16 @@ static uint32_t mpsse_shortlen = 0;
 static uint32_t mpsse_status = MPSSE_IDLE;
 static uint32_t jtag_cmd = 0;
 static volatile bool jtag_received_flag = false;
+static uint32_t mpsse_trace_count = 0;
 
 static inline void jtag_write(uint8_t data)
 {
     chry_ringbuffer_write_byte(&jtag_tx_rb, data);
+}
+
+void fpga_mpsse_purge_tx(void)
+{
+    chry_ringbuffer_reset(&jtag_tx_rb);
 }
 
 void fpga_mpsse_init(void)
@@ -38,6 +45,7 @@ void fpga_mpsse_init(void)
     jtag_received_flag = false;
     jtag_rx_pos = 0;
     jtag_rx_len = 0;
+    mpsse_trace_count = 0;
 }
 
 void fpga_mpsse_feed(uint8_t *data, uint32_t len)
@@ -53,7 +61,13 @@ void fpga_mpsse_feed(uint8_t *data, uint32_t len)
 
 bool fpga_mpsse_is_busy(void)
 {
-    return jtag_received_flag;
+    return jtag_received_flag ||
+           mpsse_status == MPSSE_READ_BYTE_LSB ||
+           mpsse_status == MPSSE_READ_BYTE_MSB ||
+           mpsse_status == MPSSE_READ_BIT_LSB ||
+           mpsse_status == MPSSE_READ_BIT_MSB ||
+           mpsse_status == MPSSE_CLOCK_BITS ||
+           mpsse_status == MPSSE_CLOCK_BYTES;
 }
 
 uint32_t fpga_mpsse_read_tx(uint8_t *buf, uint32_t max_len)
@@ -67,24 +81,44 @@ bool fpga_mpsse_process(void)
     uint32_t data = 0;
 
     if (!jtag_received_flag) {
-        return chry_ringbuffer_get_used(&jtag_tx_rb) > 0;
+        /* Allow data-less states to continue without new USB data */
+        if (mpsse_status != MPSSE_READ_BYTE_LSB &&
+            mpsse_status != MPSSE_READ_BYTE_MSB &&
+            mpsse_status != MPSSE_READ_BIT_LSB &&
+            mpsse_status != MPSSE_READ_BIT_MSB &&
+            mpsse_status != MPSSE_CLOCK_BITS &&
+            mpsse_status != MPSSE_CLOCK_BYTES) {
+            return chry_ringbuffer_get_used(&jtag_tx_rb) > 0;
+        }
     }
 
     switch (mpsse_status) {
         case MPSSE_IDLE:
             jtag_cmd = jtag_rx_buffer[jtag_rx_pos];
 
+            /* Trace first 50 commands for debugging */
+            if (mpsse_trace_count < 50) {
+                printf("[M] 0x%02X\r\n", jtag_cmd);
+                mpsse_trace_count++;
+            }
+
             switch (jtag_cmd) {
-                case 0x80:
-                case 0x82: /* Fake Bit-bang mode set */
+                case 0x80: /* Set Data Bits Low Byte (ADBUS) */
+                case 0x82: /* Set Data Bits High Byte (ACBUS) */
                     mpsse_status = MPSSE_NO_OP_1;
                     jtag_rx_pos++;
                     break;
 
-                case 0x81:
-                case 0x83: /* Fake read pins */
-                    usb_tx_data = jtag_rx_buffer[jtag_rx_pos] - 0x80;
+                case 0x81: /* Read Data Bits Low Byte (ADBUS) */
+                    usb_tx_data = 0;
+                    if (FPGA_TDO_READ()) usb_tx_data |= 0x04;
+                    /* Return TDO on bit 2, other bits as idle state */
                     jtag_write(usb_tx_data);
+                    jtag_rx_pos++;
+                    break;
+
+                case 0x83: /* Read Data Bits High Byte (ACBUS) */
+                    jtag_write(0x00); /* No high-byte pins connected */
                     jtag_rx_pos++;
                     break;
 
@@ -99,6 +133,20 @@ bool fpga_mpsse_process(void)
                     break;
 
                 case 0x87: /* Flush buffer immediately */
+                    {
+                        uint32_t pending = chry_ringbuffer_get_used(&jtag_tx_rb);
+                        if (pending > 0 && pending <= 16) {
+                            uint8_t peek[16];
+                            uint32_t n = chry_ringbuffer_read(&jtag_tx_rb, peek, pending);
+                            printf("[FLUSH] %lu:", n);
+                            for (uint32_t i = 0; i < n; i++) printf(" %02X", peek[i]);
+                            printf("\r\n");
+                            /* Write back for actual sending */
+                            chry_ringbuffer_write(&jtag_tx_rb, peek, n);
+                        } else if (pending > 16) {
+                            printf("[FLUSH] %lu bytes\r\n", pending);
+                        }
+                    }
                     jtag_rx_pos++;
                     break;
 
@@ -109,6 +157,18 @@ bool fpga_mpsse_process(void)
                 case 0x8D: /* Disable 3-phase data clocking */
                 case 0x96: /* Disable adaptive clocking */
                 case 0x97: /* Enable adaptive clocking */
+                    jtag_rx_pos++;
+                    break;
+
+                case 0x8E: /* Clock For n bits with no data transfer */
+                    mpsse_status = MPSSE_RCV_LENGTH;
+                    jtag_rx_pos++;
+                    break;
+
+                case 0x8F: /* Clock For n x 8 bits with no data transfer */
+                case 0x9C: /* Clock For n x 8 bits or until GPIOL1 is low */
+                case 0x9D: /* Clock For n x 8 bits or until GPIOL1 is high */
+                    mpsse_status = MPSSE_RCV_LENGTH_L;
                     jtag_rx_pos++;
                     break;
 
@@ -154,6 +214,7 @@ bool fpga_mpsse_process(void)
                 default:
                     usb_tx_data = 0xFA; /* Bad command response */
                     jtag_write(usb_tx_data);
+                    printf("[MPSSE] unknown cmd: 0x%02X\r\n", (unsigned)jtag_rx_buffer[jtag_rx_pos]);
                     mpsse_status = MPSSE_ERROR;
                     break;
             }
@@ -169,7 +230,9 @@ bool fpga_mpsse_process(void)
             mpsse_longlen |= (jtag_rx_buffer[jtag_rx_pos] << 8) & 0xff00;
             jtag_rx_pos++;
 
-            if (jtag_cmd == 0x20 || jtag_cmd == 0x24) {
+            if (jtag_cmd == 0x8F || jtag_cmd == 0x9C || jtag_cmd == 0x9D) {
+                mpsse_status = MPSSE_CLOCK_BYTES;
+            } else if (jtag_cmd == 0x20 || jtag_cmd == 0x24) {
                 mpsse_status = MPSSE_READ_BYTE_MSB;
             } else if (jtag_cmd == 0x28 || jtag_cmd == 0x2c) {
                 mpsse_status = MPSSE_READ_BYTE_LSB;
@@ -259,7 +322,9 @@ bool fpga_mpsse_process(void)
         case MPSSE_RCV_LENGTH: /* Receive length for bit commands */
             mpsse_shortlen = jtag_rx_buffer[jtag_rx_pos];
 
-            if (jtag_cmd == 0x6b || jtag_cmd == 0x4b || jtag_cmd == 0x6f || jtag_cmd == 0x4f) {
+            if (jtag_cmd == 0x8E) {
+                mpsse_status = MPSSE_CLOCK_BITS;
+            } else if (jtag_cmd == 0x6b || jtag_cmd == 0x4b || jtag_cmd == 0x6f || jtag_cmd == 0x4f) {
                 mpsse_status = MPSSE_TMS_OUT;
             } else if (jtag_cmd == 0x22 || jtag_cmd == 0x26) {
                 mpsse_status = MPSSE_READ_BIT_MSB;
@@ -381,6 +446,14 @@ bool fpga_mpsse_process(void)
             break;
 
         case MPSSE_NO_OP_1:
+            if (jtag_cmd == 0x80) {
+                /* Set Data Bits Low Byte: apply GPIO output values
+                 * Bit 0 = TCK, Bit 1 = TDI, Bit 2 = TDO(in), Bit 3 = TMS */
+                uint8_t val = jtag_rx_buffer[jtag_rx_pos];
+                if (val & 0x01) FPGA_TCK_HIGH(); else FPGA_TCK_LOW();
+                if (val & 0x02) FPGA_TDI_HIGH(); else FPGA_TDI_LOW();
+                if (val & 0x08) FPGA_TMS_HIGH(); else FPGA_TMS_LOW();
+            }
             jtag_rx_pos++;
             mpsse_status = MPSSE_NO_OP_2;
             break;
@@ -458,6 +531,28 @@ bool fpga_mpsse_process(void)
             jtag_write(usb_tx_data);
             mpsse_status = MPSSE_IDLE;
             /* No jtag_rx_pos++ — read-only, no data byte to consume */
+            break;
+
+        case MPSSE_CLOCK_BITS: /* Clock TCK for (shortlen+1) cycles, no data */
+            do {
+                FPGA_TCK_LOW();
+                FPGA_TCK_HIGH();
+            } while ((mpsse_shortlen--) > 0);
+            FPGA_TCK_LOW();
+            mpsse_status = MPSSE_IDLE;
+            /* No jtag_rx_pos++ — no data byte to consume */
+            break;
+
+        case MPSSE_CLOCK_BYTES: /* Clock 8 TCK cycles per iteration, (longlen+1) iterations */
+            for (uint32_t i = 8; i; i--) {
+                FPGA_TCK_LOW();
+                FPGA_TCK_HIGH();
+            }
+            FPGA_TCK_LOW();
+            if (mpsse_longlen == 0) {
+                mpsse_status = MPSSE_IDLE;
+            }
+            mpsse_longlen--;
             break;
 
         default:

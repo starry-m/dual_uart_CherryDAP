@@ -29,6 +29,8 @@ extern "C" {
 #define MPSSE_READ_BYTE_MSB     13
 #define MPSSE_READ_BIT_LSB      14
 #define MPSSE_READ_BIT_MSB      15
+#define MPSSE_CLOCK_BITS        16
+#define MPSSE_CLOCK_BYTES       17
 
 /* JTAG buffer sizes */
 #define FPGA_JTAG_TX_BUFFER_SIZE (2 * 1024)
@@ -36,6 +38,9 @@ extern "C" {
 
 /* Initialize MPSSE engine */
 void fpga_mpsse_init(void);
+
+/* Purge MPSSE TX ring buffer (for SIO_RESET purge RX) */
+void fpga_mpsse_purge_tx(void);
 
 /* Feed received USB data to MPSSE engine */
 void fpga_mpsse_feed(uint8_t *data, uint32_t len);

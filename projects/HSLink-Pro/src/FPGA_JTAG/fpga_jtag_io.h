@@ -73,14 +73,22 @@ static inline void fpga_jtag_gpio_init(void)
     gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDI), GPIO_GET_PIN_INDEX(FPGA_PIN_TDI), 0);
 }
 
-/* Fast pin access macros */
-#define FPGA_TMS_HIGH()   gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TMS), GPIO_GET_PIN_INDEX(FPGA_PIN_TMS), 1)
-#define FPGA_TMS_LOW()    gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TMS), GPIO_GET_PIN_INDEX(FPGA_PIN_TMS), 0)
-#define FPGA_TCK_HIGH()   gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TCK), GPIO_GET_PIN_INDEX(FPGA_PIN_TCK), 1)
-#define FPGA_TCK_LOW()    gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TCK), GPIO_GET_PIN_INDEX(FPGA_PIN_TCK), 0)
-#define FPGA_TDI_HIGH()   gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDI), GPIO_GET_PIN_INDEX(FPGA_PIN_TDI), 1)
-#define FPGA_TDI_LOW()    gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDI), GPIO_GET_PIN_INDEX(FPGA_PIN_TDI), 0)
-#define FPGA_TDO_READ()   gpio_read_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDO), GPIO_GET_PIN_INDEX(FPGA_PIN_TDO))
+/* Delay for JTAG clock timing, same as PIN_DELAY_SLOW(DAP_Data.clock_delay) */
+#define FPGA_JTAG_DELAY()                          \
+    do {                                            \
+        __asm volatile("fence io, io");             \
+        volatile uint32_t _cnt = 5; \
+        while (_cnt--) { __asm volatile(""); }      \
+    } while(0)
+
+/* Fast pin access macros (with fence io, io for RISC-V I/O ordering) */
+#define FPGA_TMS_HIGH()   do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TMS), GPIO_GET_PIN_INDEX(FPGA_PIN_TMS), 1); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TMS_LOW()    do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TMS), GPIO_GET_PIN_INDEX(FPGA_PIN_TMS), 0); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TCK_HIGH()   do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TCK), GPIO_GET_PIN_INDEX(FPGA_PIN_TCK), 1); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TCK_LOW()    do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TCK), GPIO_GET_PIN_INDEX(FPGA_PIN_TCK), 0); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TDI_HIGH()   do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDI), GPIO_GET_PIN_INDEX(FPGA_PIN_TDI), 1); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TDI_LOW()    do { gpio_write_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDI), GPIO_GET_PIN_INDEX(FPGA_PIN_TDI), 0); __asm volatile("fence io, io"); } while(0)
+#define FPGA_TDO_READ()   ({ uint32_t _sta = gpio_read_pin(FPGA_GPIO, GPIO_GET_PORT_INDEX(FPGA_PIN_TDO), GPIO_GET_PIN_INDEX(FPGA_PIN_TDO)); __asm volatile("fence io, io"); _sta; })
 
 #ifdef __cplusplus
 }

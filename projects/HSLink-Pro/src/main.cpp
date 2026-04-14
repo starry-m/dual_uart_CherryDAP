@@ -78,6 +78,7 @@ int main() {
 
     /* Default: start in DAP mode */
     chry_dap_init(0, HPM_USB0_BASE);
+//    fpga_usb_init(0, HPM_USB0_BASE);
 
     // led.SetNeoPixel(neopixel);
 
@@ -96,6 +97,7 @@ int main() {
         if (mode_switch_changed()) {
             if (mode_switch_get() == MODE_FPGA_JTAG) {
                 chry_dap_deinit(0);
+                fpga_jtag_init();  /* Re-init GPIO + MPSSE + self-test */
                 fpga_usb_init(0, HPM_USB0_BASE);
             } else {
                 fpga_usb_deinit(0);

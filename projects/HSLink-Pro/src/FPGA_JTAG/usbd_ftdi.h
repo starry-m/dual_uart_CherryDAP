@@ -52,6 +52,19 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
 struct cdc_line_coding;
 bool ftdi_uart_config_poll(struct cdc_line_coding *lc);
 
+/* Get latency timer values (ms) */
+uint8_t ftdi_get_latency_timer_a(void);
+uint8_t ftdi_get_latency_timer_b(void);
+
+/* Get which port is currently in MPSSE mode (0=none, 1=ChA, 2=ChB) */
+uint8_t ftdi_get_mpsse_port(void);
+
+/* Reset endpoint TX state (called on SIO_RESET / clear halt recovery) */
+void fpga_reset_tx_state(void);
+
+/* Discard pending RX data and re-arm OUT endpoint (for SIO_RESET full reset) */
+void fpga_discard_rx(void);
+
 #ifdef __cplusplus
 }
 #endif

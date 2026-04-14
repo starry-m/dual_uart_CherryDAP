@@ -12,7 +12,9 @@
 #include "usbd_core.h"
 #include "usbd_cdc.h"
 #include "dap_main.h"
+#include "board.h"
 #include <string.h>
+#include <stdio.h>
 
 /* ========== FT2232H USB Descriptor Definitions ========== */
 
@@ -34,12 +36,12 @@ static const uint8_t fpga_config_descriptor[] = {
                                USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
     /* Interface 0: Channel A - JTAG/MPSSE (vendor class) */
     USB_INTERFACE_DESCRIPTOR_INIT(0x00, 0x00, 0x02, 0xFF, 0xFF, 0xFF, 0x02),
-    USB_ENDPOINT_DESCRIPTOR_INIT(FPGA_JTAG_OUT_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
     USB_ENDPOINT_DESCRIPTOR_INIT(FPGA_JTAG_IN_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
+    USB_ENDPOINT_DESCRIPTOR_INIT(FPGA_JTAG_OUT_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
     /* Interface 1: Channel B - UART (vendor class, same as real FT2232H) */
     USB_INTERFACE_DESCRIPTOR_INIT(0x01, 0x00, 0x02, 0xFF, 0xFF, 0xFF, 0x02),
-    USB_ENDPOINT_DESCRIPTOR_INIT(FTDI_CHB_OUT_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
     USB_ENDPOINT_DESCRIPTOR_INIT(FTDI_CHB_IN_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
+    USB_ENDPOINT_DESCRIPTOR_INIT(FTDI_CHB_OUT_EP, USB_ENDPOINT_TYPE_BULK, DAP_PACKET_SIZE, 0x00),
 };
 
 static const uint8_t fpga_device_quality_descriptor[] = {
@@ -111,9 +113,23 @@ static volatile bool fpga_rx_ready = false;
 static volatile bool fpga_tx_idle = true;
 static volatile uint32_t fpga_rx_len = 0;
 
+/* Latency timer heartbeat: track last send time per channel */
+static volatile uint64_t cha_last_tx_time = 0;
+static volatile uint64_t chb_last_tx_time = 0;
+/* Track when TX was started, for timeout recovery if clear halt cancels transfer */
+static volatile uint64_t cha_tx_start_time = 0;
+static volatile uint64_t chb_tx_start_time = 0;
+/* Device configured flag - don't send heartbeat before host configures us */
+static volatile bool fpga_usb_configured = false;
+
 void fpga_jtag_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void)busid;
+    if (ftdi_get_mpsse_port() == 2) {
+        /* MPSSE is on Channel B, Channel A OUT is unused - just re-arm */
+        usbd_ep_start_read(0, FPGA_JTAG_OUT_EP, fpga_ep_rx_buf, FPGA_JTAG_PACKET_SIZE);
+        return;
+    }
     if (nbytes > 0 && !fpga_rx_ready) {
         fpga_rx_len = nbytes;
         fpga_rx_ready = true;
@@ -125,7 +141,12 @@ void fpga_jtag_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 void fpga_jtag_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void)busid;
-    fpga_tx_idle = true;
+    if (ftdi_get_mpsse_port() != 2) {
+        /* Channel A IN completed for MPSSE */
+        fpga_tx_idle = true;
+        cha_last_tx_time = millis();
+    }
+    /* If MPSSE is on Channel B, Channel A IN is not used for MPSSE */
 }
 
 /* ========== Channel B: UART Bridge ========== */
@@ -138,6 +159,24 @@ static volatile bool ftdi_chb_rx_idle = false;
 static void ftdi_chb_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void)busid;
+    if (ftdi_get_mpsse_port() == 2) {
+        /* Channel B is in MPSSE mode - feed data to MPSSE engine */
+        if (nbytes > 0 && !fpga_rx_ready) {
+            /* Debug: dump raw packet */
+            printf("[PKT] %lu:", nbytes);
+            for (uint32_t i = 0; i < nbytes && i < 24; i++)
+                printf(" %02X", ftdi_chb_rx_buf[i]);
+            if (nbytes > 24) printf(" ...");
+            printf("\r\n");
+            memcpy(fpga_ep_rx_buf, ftdi_chb_rx_buf, nbytes);
+            fpga_rx_len = nbytes;
+            fpga_rx_ready = true;
+        } else {
+            usbd_ep_start_read(0, FTDI_CHB_OUT_EP, ftdi_chb_rx_buf, DAP_PACKET_SIZE);
+        }
+        return;
+    }
+    /* Normal UART mode */
     chry_ringbuffer_write(&g_usbrx, ftdi_chb_rx_buf, nbytes);
     if (chry_ringbuffer_get_free(&g_usbrx) >= DAP_PACKET_SIZE) {
         usbd_ep_start_read(0, FTDI_CHB_OUT_EP, ftdi_chb_rx_buf, DAP_PACKET_SIZE);
@@ -149,7 +188,14 @@ static void ftdi_chb_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 static void ftdi_chb_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void)busid;
-    ftdi_chb_tx_idle = true;
+    if (ftdi_get_mpsse_port() == 2) {
+        /* Channel B IN completed for MPSSE */
+        fpga_tx_idle = true;
+        cha_last_tx_time = millis();
+    } else {
+        ftdi_chb_tx_idle = true;
+        chb_last_tx_time = millis();
+    }
 }
 
 /* ========== Endpoint / Interface Structures ========== */
@@ -192,8 +238,12 @@ static void fpga_usb_event_handler(uint8_t busid, uint8_t event)
             ftdi_chb_tx_idle = true;
             ftdi_chb_rx_idle = false;
             uarttx_idle_flag = 1;
+            fpga_usb_configured = false;
             break;
         case USBD_EVENT_CONFIGURED:
+            fpga_usb_configured = true;
+            cha_last_tx_time = millis();
+            chb_last_tx_time = millis();
             /* Arm Channel A OUT for JTAG */
             usbd_ep_start_read(0, FPGA_JTAG_OUT_EP, fpga_ep_rx_buf, FPGA_JTAG_PACKET_SIZE);
             /* Arm Channel B OUT for UART */
@@ -206,12 +256,104 @@ static void fpga_usb_event_handler(uint8_t busid, uint8_t event)
 
 /* ========== Public API ========== */
 
+void fpga_reset_tx_state(void)
+{
+    fpga_tx_idle = true;
+    ftdi_chb_tx_idle = true;
+    /* NOTE: Do NOT clear fpga_rx_ready here!
+     * Clearing it without re-arming OUT EP causes permanent deadlock:
+     * the OUT EP callback already de-armed it, setting rx_ready=false
+     * loses the data AND leaves OUT EP permanently un-armed. */
+}
+
+void fpga_discard_rx(void)
+{
+    /* Discard pending RX data and re-arm OUT endpoint */
+    if (fpga_rx_ready) {
+        fpga_rx_ready = false;
+        usbd_ep_start_read(0, FPGA_JTAG_OUT_EP, fpga_ep_rx_buf, FPGA_JTAG_PACKET_SIZE);
+    }
+}
+
+/* Override CherryUSB weak clear halt handler - per-endpoint recovery */
+void usbd_event_clear_halt_handler(uint8_t busid, uint8_t ep)
+{
+    (void)busid;
+    if (ep == FPGA_JTAG_IN_EP) {
+        if (ftdi_get_mpsse_port() != 2)
+            fpga_tx_idle = true;
+    } else if (ep == FTDI_CHB_IN_EP) {
+        if (ftdi_get_mpsse_port() == 2)
+            fpga_tx_idle = true;
+        else
+            ftdi_chb_tx_idle = true;
+    }
+}
+
+/* Direct JTAG self-test: read IDCODE without MPSSE, for hardware diagnosis */
+static void fpga_jtag_self_test(void)
+{
+    uint32_t idcode = 0;
+    FPGA_TDI_HIGH();
+    printf("[JTAG] TDO pin (idle): %d\r\n", FPGA_TDO_READ());
+    FPGA_TDI_LOW();
+    /* TLR: 5 clocks with TMS=1 */
+    FPGA_TMS_HIGH();
+    FPGA_TDI_LOW();
+    for (int i = 0; i < 5; i++) {
+        FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+    }
+
+    /* RTI: TMS=0 */
+    FPGA_TMS_LOW();
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+
+    /* Select-DR-Scan: TMS=1 */
+    FPGA_TMS_HIGH();
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+
+    /* Capture-DR: TMS=0 (IDCODE loaded into DR) */
+    FPGA_TMS_LOW();
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+
+    /* Shift-DR: TMS=0 (enter shift state) */
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+
+    /* Now in Shift-DR. After falling edge, TDO = bit[0] */
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY();
+
+    /* Shift out 32 bits */
+    for (int i = 0; i < 32; i++) {
+        FPGA_TCK_LOW(); FPGA_JTAG_DELAY();
+        FPGA_TCK_HIGH(); FPGA_JTAG_DELAY();
+        if (FPGA_TDO_READ()) {
+            idcode |= (1u << i);
+        }
+    }
+
+    /* Exit: TMS=1 → Exit1-DR → Update-DR → RTI */
+    FPGA_TMS_HIGH();
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY(); /* Exit1-DR */
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY(); /* Update-DR */
+    FPGA_TMS_LOW();
+    FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY(); /* RTI */
+
+    printf("[JTAG] TDO pin (after scan): %d\r\n", FPGA_TDO_READ());
+    printf("[JTAG] Self-test IDCODE: 0x%08lX %s\r\n",
+           (unsigned long)idcode,
+           (idcode == 0x1100481B) ? "(GW1NR-9C OK)" :
+           (idcode == 0xFFFFFFFF) ? "(TDO stuck HIGH - no FPGA?)" :
+           (idcode == 0x00000000) ? "(TDO stuck LOW - short?)" :
+           "(UNEXPECTED)");
+}
+
 void fpga_jtag_init(void)
 {
     fpga_jtag_gpio_init();
     fpga_mpsse_init();
     fpga_rx_ready = false;
     fpga_tx_idle = true;
+    fpga_jtag_self_test();
 }
 
 void fpga_usb_init(uint8_t busid, uint32_t reg_base)
@@ -224,7 +366,8 @@ void fpga_usb_init(uint8_t busid, uint32_t reg_base)
     usbd_add_endpoint(busid, &fpga_out_ep);
     usbd_add_endpoint(busid, &fpga_in_ep);
 
-    /* Channel B: UART (no vendor_handler — Channel A handles all vendor requests) */
+    /* Channel B: UART (also needs vendor_handler for FTDI driver requests) */
+    ftdi_chb_intf.vendor_handler = ftdi_vendor_request_handler;
     usbd_add_interface(busid, &ftdi_chb_intf);
     usbd_add_endpoint(busid, &chb_out_ep);
     usbd_add_endpoint(busid, &chb_in_ep);
@@ -244,6 +387,12 @@ void fpga_usb_deinit(uint8_t busid)
 
 void fpga_jtag_process(void)
 {
+    uint8_t mp = ftdi_get_mpsse_port();
+    uint8_t in_ep  = (mp == 2) ? FTDI_CHB_IN_EP  : FPGA_JTAG_IN_EP;
+    uint8_t out_ep = (mp == 2) ? FTDI_CHB_OUT_EP  : FPGA_JTAG_OUT_EP;
+    uint8_t *out_buf = (mp == 2) ? ftdi_chb_rx_buf : fpga_ep_rx_buf;
+    uint8_t lat    = (mp == 2) ? ftdi_get_latency_timer_b() : ftdi_get_latency_timer_a();
+
     /* Process received USB data through MPSSE engine */
     if (fpga_rx_ready) {
         fpga_mpsse_feed(fpga_ep_rx_buf, fpga_rx_len);
@@ -255,25 +404,48 @@ void fpga_jtag_process(void)
         }
 
         /* Ready for next USB packet */
-        usbd_ep_start_read(0, FPGA_JTAG_OUT_EP, fpga_ep_rx_buf, FPGA_JTAG_PACKET_SIZE);
+        usbd_ep_start_read(0, out_ep, out_buf, DAP_PACKET_SIZE);
+    }
+
+    /* Continue read-only MPSSE operations that don't need new USB data */
+    while (fpga_mpsse_is_busy()) {
+        fpga_mpsse_process();
     }
 
     /* Send response data back to host if available */
-    if (fpga_tx_idle) {
+    if (!fpga_tx_idle && (millis() - cha_tx_start_time) > 2) {
+        /* Timeout recovery: clear halt may have cancelled the transfer */
+        fpga_tx_idle = true;
+    }
+    if (fpga_tx_idle && fpga_usb_configured) {
         uint32_t tx_len = fpga_mpsse_read_tx(fpga_tx_buffer + FTDI_HEADER_SIZE,
                                               FPGA_JTAG_PACKET_SIZE - FTDI_HEADER_SIZE);
         if (tx_len > 0) {
-            /* Prepend FTDI modem status header */
+            /* MPSSE response: send immediately with modem status header */
             fpga_tx_buffer[0] = 0x01;
             fpga_tx_buffer[1] = 0x60;
             fpga_tx_idle = false;
-            usbd_ep_start_write(0, FPGA_JTAG_IN_EP, fpga_tx_buffer, tx_len + FTDI_HEADER_SIZE);
+            cha_tx_start_time = millis();
+            usbd_ep_start_write(0, in_ep, fpga_tx_buffer, tx_len + FTDI_HEADER_SIZE);
+        } else {
+            /* No data: send modem status heartbeat only when latency timer expires */
+            if (lat > 0 && (millis() - cha_last_tx_time) >= lat) {
+                fpga_tx_buffer[0] = 0x01;
+                fpga_tx_buffer[1] = 0x60;
+                fpga_tx_idle = false;
+                cha_tx_start_time = millis();
+                usbd_ep_start_write(0, in_ep, fpga_tx_buffer, FTDI_HEADER_SIZE);
+            }
         }
     }
 }
 
 void fpga_uart_handle(void)
 {
+    /* When Channel B is in MPSSE mode, skip UART processing entirely */
+    if (ftdi_get_mpsse_port() == 2)
+        return;
+
     uint32_t size;
     uint8_t *buffer;
 
@@ -286,6 +458,10 @@ void fpga_uart_handle(void)
     }
 
     /* UART RX → USB TX (Channel B IN with FTDI header) */
+    if (!ftdi_chb_tx_idle && (millis() - chb_tx_start_time) > 2) {
+        /* Timeout recovery for Channel B */
+        ftdi_chb_tx_idle = true;
+    }
     if (ftdi_chb_tx_idle && chry_ringbuffer_get_used(&g_uartrx)) {
         buffer = chry_ringbuffer_linear_read_setup(&g_uartrx, &size);
         if (size > DAP_PACKET_SIZE - FTDI_HEADER_SIZE) {
@@ -296,7 +472,18 @@ void fpga_uart_handle(void)
         memcpy(&ftdi_chb_tx_buf[FTDI_HEADER_SIZE], buffer, size);
         chry_ringbuffer_linear_read_done(&g_uartrx, size);
         ftdi_chb_tx_idle = false;
+        chb_tx_start_time = millis();
         usbd_ep_start_write(0, FTDI_CHB_IN_EP, ftdi_chb_tx_buf, size + FTDI_HEADER_SIZE);
+    } else if (ftdi_chb_tx_idle && fpga_usb_configured) {
+        /* Send modem status heartbeat only when latency timer expires */
+        uint8_t lat = ftdi_get_latency_timer_b();
+        if (lat > 0 && (millis() - chb_last_tx_time) >= lat) {
+            ftdi_chb_tx_buf[0] = 0x01;
+            ftdi_chb_tx_buf[1] = 0x60;
+            ftdi_chb_tx_idle = false;
+            chb_tx_start_time = millis();
+            usbd_ep_start_write(0, FTDI_CHB_IN_EP, ftdi_chb_tx_buf, FTDI_HEADER_SIZE);
+        }
     }
 
     /* USB RX → UART TX (Channel B OUT → DMA) */
