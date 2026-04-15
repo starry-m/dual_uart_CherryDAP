@@ -8,7 +8,6 @@
 #include "fpga_jtag_io.h"
 #include "chry_ringbuffer.h"
 #include <string.h>
-#include <stdio.h>
 
 /* TX ring buffer for JTAG response data */
 static uint8_t jtag_tx_buffer[FPGA_JTAG_TX_BUFFER_SIZE];
@@ -25,7 +24,6 @@ static uint32_t mpsse_shortlen = 0;
 static uint32_t mpsse_status = MPSSE_IDLE;
 static uint32_t jtag_cmd = 0;
 static volatile bool jtag_received_flag = false;
-static uint32_t mpsse_trace_count = 0;
 
 static inline void jtag_write(uint8_t data)
 {
@@ -45,7 +43,6 @@ void fpga_mpsse_init(void)
     jtag_received_flag = false;
     jtag_rx_pos = 0;
     jtag_rx_len = 0;
-    mpsse_trace_count = 0;
 }
 
 void fpga_mpsse_feed(uint8_t *data, uint32_t len)
@@ -96,12 +93,6 @@ bool fpga_mpsse_process(void)
         case MPSSE_IDLE:
             jtag_cmd = jtag_rx_buffer[jtag_rx_pos];
 
-            /* Trace first 50 commands for debugging */
-            if (mpsse_trace_count < 50) {
-                printf("[M] 0x%02X\r\n", jtag_cmd);
-                mpsse_trace_count++;
-            }
-
             switch (jtag_cmd) {
                 case 0x80: /* Set Data Bits Low Byte (ADBUS) */
                 case 0x82: /* Set Data Bits High Byte (ACBUS) */
@@ -133,20 +124,6 @@ bool fpga_mpsse_process(void)
                     break;
 
                 case 0x87: /* Flush buffer immediately */
-                    {
-                        uint32_t pending = chry_ringbuffer_get_used(&jtag_tx_rb);
-                        if (pending > 0 && pending <= 16) {
-                            uint8_t peek[16];
-                            uint32_t n = chry_ringbuffer_read(&jtag_tx_rb, peek, pending);
-                            printf("[FLUSH] %lu:", n);
-                            for (uint32_t i = 0; i < n; i++) printf(" %02X", peek[i]);
-                            printf("\r\n");
-                            /* Write back for actual sending */
-                            chry_ringbuffer_write(&jtag_tx_rb, peek, n);
-                        } else if (pending > 16) {
-                            printf("[FLUSH] %lu bytes\r\n", pending);
-                        }
-                    }
                     jtag_rx_pos++;
                     break;
 
@@ -214,7 +191,6 @@ bool fpga_mpsse_process(void)
                 default:
                     usb_tx_data = 0xFA; /* Bad command response */
                     jtag_write(usb_tx_data);
-                    printf("[MPSSE] unknown cmd: 0x%02X\r\n", (unsigned)jtag_rx_buffer[jtag_rx_pos]);
                     mpsse_status = MPSSE_ERROR;
                     break;
             }

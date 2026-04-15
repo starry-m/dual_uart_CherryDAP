@@ -11,7 +11,6 @@
 #include "usbd_core.h"
 #include "usbd_cdc.h"
 #include <string.h>
-#include <stdio.h>
 
 /* FTDI EEPROM emulation data - FT2232 compatible */
 const uint16_t ftdi_eeprom_info[] = {
@@ -97,7 +96,6 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_RESET_REQUEST:
-            printf("[FTDI] SIO_RESET wValue=%d port=%d\r\n", setup->wValue, port);
             switch (setup->wValue) {
                 case 0: /* SIO_RESET_SIO: full device reset */
                     latency_timer_a = 0x10;
@@ -173,9 +171,7 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
             break;
 
         case SIO_SET_BITMODE_REQUEST:
-            /* Bitbang/MPSSE mode setting - mode is determined by data */
-            printf("[FTDI] SET_BITMODE mask=0x%02X mode=0x%02X port=%d\r\n",
-                   setup->wValue & 0xFF, (setup->wValue >> 8) & 0xFF, port);
+            /* Bitbang/MPSSE mode setting */
             if (((setup->wValue >> 8) & 0xFF) == 0x02) {
                 mpsse_port = port;  /* This port is now in MPSSE mode */
             } else if (port == mpsse_port) {

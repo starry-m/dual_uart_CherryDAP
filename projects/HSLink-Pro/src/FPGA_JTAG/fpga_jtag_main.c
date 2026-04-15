@@ -162,12 +162,6 @@ static void ftdi_chb_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
     if (ftdi_get_mpsse_port() == 2) {
         /* Channel B is in MPSSE mode - feed data to MPSSE engine */
         if (nbytes > 0 && !fpga_rx_ready) {
-            /* Debug: dump raw packet */
-            printf("[PKT] %lu:", nbytes);
-            for (uint32_t i = 0; i < nbytes && i < 24; i++)
-                printf(" %02X", ftdi_chb_rx_buf[i]);
-            if (nbytes > 24) printf(" ...");
-            printf("\r\n");
             memcpy(fpga_ep_rx_buf, ftdi_chb_rx_buf, nbytes);
             fpga_rx_len = nbytes;
             fpga_rx_ready = true;
@@ -295,7 +289,6 @@ static void fpga_jtag_self_test(void)
 {
     uint32_t idcode = 0;
     FPGA_TDI_HIGH();
-    printf("[JTAG] TDO pin (idle): %d\r\n", FPGA_TDO_READ());
     FPGA_TDI_LOW();
     /* TLR: 5 clocks with TMS=1 */
     FPGA_TMS_HIGH();
@@ -338,10 +331,9 @@ static void fpga_jtag_self_test(void)
     FPGA_TMS_LOW();
     FPGA_TCK_LOW(); FPGA_JTAG_DELAY(); FPGA_TCK_HIGH(); FPGA_JTAG_DELAY(); /* RTI */
 
-    printf("[JTAG] TDO pin (after scan): %d\r\n", FPGA_TDO_READ());
     printf("[JTAG] Self-test IDCODE: 0x%08lX %s\r\n",
            (unsigned long)idcode,
-           (idcode == 0x1100481B) ? "(GW1NR-9C OK)" :
+           (idcode == 0x1100581B || idcode == 0x1100481B) ? "(GW1NR-9 OK)" :
            (idcode == 0xFFFFFFFF) ? "(TDO stuck HIGH - no FPGA?)" :
            (idcode == 0x00000000) ? "(TDO stuck LOW - short?)" :
            "(UNEXPECTED)");

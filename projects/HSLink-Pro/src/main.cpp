@@ -78,7 +78,12 @@ int main() {
 
     /* Default: start in DAP mode */
     chry_dap_init(0, HPM_USB0_BASE);
-//    fpga_usb_init(0, HPM_USB0_BASE);
+    board_init_led_pins();
+#if CONFIG_CHERRYDAP_USE_FPGA_JTAG
+    /* DAP mode: green LED on, blue LED off */
+    board_led_write(0, BOARD_LED_ON_LEVEL);
+    board_led_write(1, BOARD_LED_OFF_LEVEL);
+#endif
 
     // led.SetNeoPixel(neopixel);
 
@@ -99,9 +104,15 @@ int main() {
                 chry_dap_deinit(0);
                 fpga_jtag_init();  /* Re-init GPIO + MPSSE + self-test */
                 fpga_usb_init(0, HPM_USB0_BASE);
+                /* FPGA JTAG mode: blue LED on, green LED off */
+                board_led_write(0, BOARD_LED_OFF_LEVEL);
+                board_led_write(1, BOARD_LED_ON_LEVEL);
             } else {
                 fpga_usb_deinit(0);
                 chry_dap_init(0, HPM_USB0_BASE);
+                /* DAP mode: green LED on, blue LED off */
+                board_led_write(0, BOARD_LED_ON_LEVEL);
+                board_led_write(1, BOARD_LED_OFF_LEVEL);
             }
         }
 
