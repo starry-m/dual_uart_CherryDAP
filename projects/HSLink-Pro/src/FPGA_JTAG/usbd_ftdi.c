@@ -97,19 +97,31 @@ int ftdi_vendor_request_handler(uint8_t busid, struct usb_setup_packet *setup,
 
         case SIO_RESET_REQUEST:
             switch (setup->wValue) {
-                case 0: /* SIO_RESET_SIO: full device reset */
-                    latency_timer_a = 0x10;
-                    latency_timer_b = 0x10;
-                    fpga_mpsse_init();
-                    fpga_reset_tx_state();
-                    fpga_discard_rx();
+                case 0: /* SIO_RESET_SIO: reset specific port */
+                    if (port <= 1) latency_timer_a = 0x10;
+                    if (port == 2) latency_timer_b = 0x10;
+                    if (port == mpsse_port) {
+                        /* Only reset MPSSE when the MPSSE port itself is being reset */
+                        fpga_mpsse_init();
+                        fpga_tx_idle_set(true);
+                        fpga_discard_rx();
+                    } else if (port == 2 && mpsse_port != 2) {
+                        /* Non-MPSSE Channel B reset */
+                        fpga_chb_tx_idle_set(true);
+                    }
                     break;
-                case 1: /* SIO_RESET_PURGE_RX: purge read buffer (device->host) */
-                    fpga_mpsse_purge_tx();
-                    fpga_reset_tx_state();
+                case 1: /* SIO_RESET_PURGE_RX: purge device→host buffer for specific port */
+                    if (port == mpsse_port) {
+                        fpga_mpsse_purge_tx();
+                        fpga_tx_idle_set(true);
+                    } else if (port == 2 && mpsse_port != 2) {
+                        fpga_chb_tx_idle_set(true);
+                    }
                     break;
-                case 2: /* SIO_RESET_PURGE_TX: purge write buffer (host->device) */
-                    /* Discard pending RX data; MPSSE state preserved */
+                case 2: /* SIO_RESET_PURGE_TX: purge host→device buffer for specific port */
+                    if (port == mpsse_port) {
+                        fpga_discard_rx();
+                    }
                     break;
                 default:
                     break;

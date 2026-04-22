@@ -62,6 +62,10 @@ uint8_t ftdi_get_mpsse_port(void);
 /* Reset endpoint TX state (called on SIO_RESET / clear halt recovery) */
 void fpga_reset_tx_state(void);
 
+/* Port-specific TX idle control (for port-aware SIO_RESET) */
+void fpga_tx_idle_set(bool idle);
+void fpga_chb_tx_idle_set(bool idle);
+
 /* Discard pending RX data and re-arm OUT endpoint (for SIO_RESET full reset) */
 void fpga_discard_rx(void);
 

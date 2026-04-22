@@ -25,6 +25,35 @@ static uint32_t mpsse_status = MPSSE_IDLE;
 static uint32_t jtag_cmd = 0;
 static volatile bool jtag_received_flag = false;
 
+/* MPSSE clock rate emulation
+ * FT2232H: freq = base / ((1 + divisor) * 2)
+ *   base = 60MHz (div5 off, 0x8A) or 12MHz (div5 on, 0x8B)
+ * We emulate the timing by adding delays between TCK edges. */
+static bool mpsse_div5_enabled = true;       /* 0x8B: divide-by-5 enabled (12MHz base) */
+static uint16_t mpsse_divisor = 0;           /* 0x86: clock divisor */
+static uint32_t mpsse_half_clk_delay = 5;    /* delay loop count per half-clock */
+
+static void mpsse_update_clock(void)
+{
+    uint32_t base = mpsse_div5_enabled ? 12000000U : 60000000U;
+    uint32_t freq = base / ((1 + mpsse_divisor) * 2);
+    if (freq == 0) freq = 1;
+    /* Half-period in CPU cycles: CPU_CLOCK / (2 * freq)
+     * Each delay loop iteration ~3 cycles; GPIO overhead ~5 cycles */
+    uint32_t half_period = 100000000U / (2 * freq);
+    mpsse_half_clk_delay = (half_period > 5) ? (half_period - 5) / 3 : 0;
+}
+
+static inline void mpsse_clk_wait(void)
+{
+    volatile uint32_t cnt = mpsse_half_clk_delay;
+    while (cnt--) { __asm volatile(""); }
+}
+
+/* TCK macros with clock-rate-controlled delay for MPSSE engine */
+#define JTAG_TCK_LOW()   do { FPGA_TCK_LOW();  mpsse_clk_wait(); } while(0)
+#define JTAG_TCK_HIGH()  do { FPGA_TCK_HIGH(); mpsse_clk_wait(); } while(0)
+
 static inline void jtag_write(uint8_t data)
 {
     chry_ringbuffer_write_byte(&jtag_tx_rb, data);
@@ -43,6 +72,9 @@ void fpga_mpsse_init(void)
     jtag_received_flag = false;
     jtag_rx_pos = 0;
     jtag_rx_len = 0;
+    mpsse_div5_enabled = true;
+    mpsse_divisor = 0;
+    mpsse_update_clock();
 }
 
 void fpga_mpsse_feed(uint8_t *data, uint32_t len)
@@ -118,7 +150,7 @@ bool fpga_mpsse_process(void)
                     jtag_rx_pos++;
                     break;
 
-                case 0x86: /* Set clock divisor - skip 2 bytes */
+                case 0x86: /* Set clock divisor - 2 parameter bytes */
                     mpsse_status = MPSSE_NO_OP_1;
                     jtag_rx_pos++;
                     break;
@@ -128,8 +160,16 @@ bool fpga_mpsse_process(void)
                     break;
 
                 /* FT2232H specific commands (single byte, no parameters) */
-                case 0x8A: /* Disable Clock Divide by 5 (60MHz) */
-                case 0x8B: /* Enable Clock Divide by 5 (12MHz) */
+                case 0x8A: /* Disable Clock Divide by 5 (60MHz base) */
+                    mpsse_div5_enabled = false;
+                    mpsse_update_clock();
+                    jtag_rx_pos++;
+                    break;
+                case 0x8B: /* Enable Clock Divide by 5 (12MHz base) */
+                    mpsse_div5_enabled = true;
+                    mpsse_update_clock();
+                    jtag_rx_pos++;
+                    break;
                 case 0x8C: /* Enable 3-phase data clocking */
                 case 0x8D: /* Disable 3-phase data clocking */
                 case 0x96: /* Disable adaptive clocking */
@@ -224,7 +264,7 @@ bool fpga_mpsse_process(void)
             usb_tx_data = 0;
 
             for (uint32_t i = 8; i; i--) {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
 
                 if (data & 0x01) {
                     FPGA_TDI_HIGH();
@@ -235,14 +275,14 @@ bool fpga_mpsse_process(void)
                 data >>= 1;
                 usb_tx_data >>= 1;
 
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
 
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x80;
                 }
             }
 
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
 
             /* Write-read commands: 0x39, 0x3d */
             if (jtag_cmd == 0x39 || jtag_cmd == 0x3d) {
@@ -262,7 +302,7 @@ bool fpga_mpsse_process(void)
             usb_tx_data = 0;
 
             for (uint32_t i = 8; i; i--) {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
 
                 if (data & 0x80) {
                     FPGA_TDI_HIGH();
@@ -273,14 +313,14 @@ bool fpga_mpsse_process(void)
                 data <<= 1;
                 usb_tx_data <<= 1;
 
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
 
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x01;
                 }
             }
 
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
 
             /* Write-read commands: 0x31, 0x35 */
             if (jtag_cmd == 0x31 || jtag_cmd == 0x35) {
@@ -320,7 +360,7 @@ bool fpga_mpsse_process(void)
             usb_tx_data = 0;
 
             do {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
 
                 if (data & 0x01) {
                     FPGA_TDI_HIGH();
@@ -331,14 +371,14 @@ bool fpga_mpsse_process(void)
                 data >>= 1;
                 usb_tx_data >>= 1;
 
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
 
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x80;
                 }
             } while ((mpsse_shortlen--) > 0);
 
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
 
             /* Write-read commands: 0x3b, 0x3f */
             if (jtag_cmd == 0x3b || jtag_cmd == 0x3f) {
@@ -353,7 +393,7 @@ bool fpga_mpsse_process(void)
             data = jtag_rx_buffer[jtag_rx_pos];
 
             do {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
 
                 if (data & 0x80) {
                     FPGA_TDI_HIGH();
@@ -363,10 +403,10 @@ bool fpga_mpsse_process(void)
 
                 data <<= 1;
 
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
             } while ((mpsse_shortlen--) > 0);
 
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
 
             mpsse_status = MPSSE_IDLE;
             jtag_rx_pos++;
@@ -392,7 +432,7 @@ bool fpga_mpsse_process(void)
             usb_tx_data = 0;
 
             do {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
 
                 if (data & 0x01) {
                     FPGA_TMS_HIGH();
@@ -403,14 +443,14 @@ bool fpga_mpsse_process(void)
                 data >>= 1;
                 usb_tx_data >>= 1;
 
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
 
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x80;
                 }
             } while ((mpsse_shortlen--) > 0);
 
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
 
             /* Read-back commands: 0x6b, 0x6f */
             if (jtag_cmd == 0x6b || jtag_cmd == 0x6f) {
@@ -429,12 +469,20 @@ bool fpga_mpsse_process(void)
                 if (val & 0x01) FPGA_TCK_HIGH(); else FPGA_TCK_LOW();
                 if (val & 0x02) FPGA_TDI_HIGH(); else FPGA_TDI_LOW();
                 if (val & 0x08) FPGA_TMS_HIGH(); else FPGA_TMS_LOW();
+            } else if (jtag_cmd == 0x86) {
+                /* Clock divisor low byte */
+                mpsse_divisor = jtag_rx_buffer[jtag_rx_pos];
             }
             jtag_rx_pos++;
             mpsse_status = MPSSE_NO_OP_2;
             break;
 
         case MPSSE_NO_OP_2:
+            if (jtag_cmd == 0x86) {
+                /* Clock divisor high byte - recalculate clock delay */
+                mpsse_divisor |= (uint16_t)(jtag_rx_buffer[jtag_rx_pos]) << 8;
+                mpsse_update_clock();
+            }
             mpsse_status = MPSSE_IDLE;
             jtag_rx_pos++;
             break;
@@ -442,14 +490,14 @@ bool fpga_mpsse_process(void)
         case MPSSE_READ_BYTE_LSB: /* Read-only byte, LSB first, no data consumed */
             usb_tx_data = 0;
             for (uint32_t i = 8; i; i--) {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
                 usb_tx_data >>= 1;
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x80;
                 }
             }
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             jtag_write(usb_tx_data);
 
             if (mpsse_longlen == 0) {
@@ -461,14 +509,14 @@ bool fpga_mpsse_process(void)
         case MPSSE_READ_BYTE_MSB: /* Read-only byte, MSB first */
             usb_tx_data = 0;
             for (uint32_t i = 8; i; i--) {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
                 usb_tx_data <<= 1;
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x01;
                 }
             }
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             jtag_write(usb_tx_data);
 
             if (mpsse_longlen == 0) {
@@ -480,14 +528,14 @@ bool fpga_mpsse_process(void)
         case MPSSE_READ_BIT_LSB: /* Read-only bits, LSB first */
             usb_tx_data = 0;
             do {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
                 usb_tx_data >>= 1;
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x80;
                 }
             } while ((mpsse_shortlen--) > 0);
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             jtag_write(usb_tx_data);
             mpsse_status = MPSSE_IDLE;
             /* No jtag_rx_pos++ — read-only, no data byte to consume */
@@ -496,14 +544,14 @@ bool fpga_mpsse_process(void)
         case MPSSE_READ_BIT_MSB: /* Read-only bits, MSB first */
             usb_tx_data = 0;
             do {
-                FPGA_TCK_LOW();
+                JTAG_TCK_LOW();
                 usb_tx_data <<= 1;
-                FPGA_TCK_HIGH();
+                JTAG_TCK_HIGH();
                 if (FPGA_TDO_READ()) {
                     usb_tx_data |= 0x01;
                 }
             } while ((mpsse_shortlen--) > 0);
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             jtag_write(usb_tx_data);
             mpsse_status = MPSSE_IDLE;
             /* No jtag_rx_pos++ — read-only, no data byte to consume */
@@ -511,20 +559,20 @@ bool fpga_mpsse_process(void)
 
         case MPSSE_CLOCK_BITS: /* Clock TCK for (shortlen+1) cycles, no data */
             do {
-                FPGA_TCK_LOW();
-                FPGA_TCK_HIGH();
+                JTAG_TCK_LOW();
+                JTAG_TCK_HIGH();
             } while ((mpsse_shortlen--) > 0);
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             mpsse_status = MPSSE_IDLE;
             /* No jtag_rx_pos++ — no data byte to consume */
             break;
 
         case MPSSE_CLOCK_BYTES: /* Clock 8 TCK cycles per iteration, (longlen+1) iterations */
             for (uint32_t i = 8; i; i--) {
-                FPGA_TCK_LOW();
-                FPGA_TCK_HIGH();
+                JTAG_TCK_LOW();
+                JTAG_TCK_HIGH();
             }
-            FPGA_TCK_LOW();
+            JTAG_TCK_LOW();
             if (mpsse_longlen == 0) {
                 mpsse_status = MPSSE_IDLE;
             }

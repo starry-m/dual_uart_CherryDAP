@@ -260,12 +260,25 @@ void fpga_reset_tx_state(void)
      * loses the data AND leaves OUT EP permanently un-armed. */
 }
 
+void fpga_tx_idle_set(bool idle)
+{
+    fpga_tx_idle = idle;
+}
+
+void fpga_chb_tx_idle_set(bool idle)
+{
+    ftdi_chb_tx_idle = idle;
+}
+
 void fpga_discard_rx(void)
 {
-    /* Discard pending RX data and re-arm OUT endpoint */
+    /* Discard pending RX data and re-arm the correct OUT endpoint */
     if (fpga_rx_ready) {
         fpga_rx_ready = false;
-        usbd_ep_start_read(0, FPGA_JTAG_OUT_EP, fpga_ep_rx_buf, FPGA_JTAG_PACKET_SIZE);
+        uint8_t mp = ftdi_get_mpsse_port();
+        uint8_t out_ep = (mp == 2) ? FTDI_CHB_OUT_EP : FPGA_JTAG_OUT_EP;
+        uint8_t *out_buf = (mp == 2) ? ftdi_chb_rx_buf : fpga_ep_rx_buf;
+        usbd_ep_start_read(0, out_ep, out_buf, DAP_PACKET_SIZE);
     }
 }
 
@@ -405,8 +418,12 @@ void fpga_jtag_process(void)
     }
 
     /* Send response data back to host if available */
-    if (!fpga_tx_idle && (millis() - cha_tx_start_time) > 2) {
-        /* Timeout recovery: clear halt may have cancelled the transfer */
+    if (!fpga_tx_idle && (millis() - cha_tx_start_time) > 100) {
+        /* Safety net: if IN transfer hasn't completed in 100ms, assume it's stuck.
+         * Normal USB HS bulk transfers complete in <1ms. The clear halt handler
+         * provides immediate recovery for cancelled transfers. This timeout is
+         * only for catastrophic failures. Previous 2ms timeout caused race
+         * conditions: premature TX idle → double EP write → STALL → data loss. */
         fpga_tx_idle = true;
     }
     if (fpga_tx_idle && fpga_usb_configured) {
@@ -450,8 +467,8 @@ void fpga_uart_handle(void)
     }
 
     /* UART RX → USB TX (Channel B IN with FTDI header) */
-    if (!ftdi_chb_tx_idle && (millis() - chb_tx_start_time) > 2) {
-        /* Timeout recovery for Channel B */
+    if (!ftdi_chb_tx_idle && (millis() - chb_tx_start_time) > 100) {
+        /* Safety net timeout for Channel B (same rationale as Channel A) */
         ftdi_chb_tx_idle = true;
     }
     if (ftdi_chb_tx_idle && chry_ringbuffer_get_used(&g_uartrx)) {
