@@ -66,7 +66,7 @@ void mode_switch_init(void)
     button_stable = false;
     press_handled = false;
     last_change_time = millis();
-    printf("Mode switch: DAP mode (default)\n");
+    printf("Mode switch: DAP mode (default) --\n");
 }
 
 void mode_switch_poll(void)
