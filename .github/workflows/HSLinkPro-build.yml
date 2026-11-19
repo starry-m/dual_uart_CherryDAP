@@ -27,18 +27,10 @@ jobs:
           submodules: true
 
       - name: Install RISCV GNU Toolchain
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           curl -fsSL \
-            -H "Authorization: ******" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/latest \
-            | jq -r '.assets[].browser_download_url' \
-            | grep 'linux-x64\.tar\.gz$' \
-            | grep -v '\.sha$' \
-            | head -n 1 \
-            | xargs curl -fsSL -o /tmp/riscv-toolchain.tar.gz
+            https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v14.2.0-3/xpack-riscv-none-elf-gcc-14.2.0-3-linux-x64.tar.gz \
+            -o /tmp/riscv-toolchain.tar.gz
           mkdir -p /home/runner/work/_temp/.setup-riscv-gnu-toolchain
           tar -xzf /tmp/riscv-toolchain.tar.gz \
             --strip-components=1 \
