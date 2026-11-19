@@ -26,7 +26,23 @@ jobs:
         with:
           submodules: true
 
-      - uses: gregdavill/setup-riscv-gnu-toolchain@v2.0
+      - name: Install RISCV GNU Toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL \
+            -H "Authorization: ******" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/latest \
+            | jq -r '.assets[].browser_download_url' \
+            | grep 'linux-x64\.tar\.gz$' \
+            | grep -v '\.sha$' \
+            | head -n 1 \
+            | xargs curl -fsSL -o /tmp/riscv-toolchain.tar.gz
+          mkdir -p /home/runner/work/_temp/.setup-riscv-gnu-toolchain
+          tar -xzf /tmp/riscv-toolchain.tar.gz \
+            --strip-components=1 \
+            -C /home/runner/work/_temp/.setup-riscv-gnu-toolchain
 
       - name: Install HPM SDK
         run: |
